@@ -82,6 +82,8 @@ void OnTick()
          //en la lectura.
          
          FractalAnterior = FractalNuevo;
+         FractalValido = false;
+         
          if (PintarLineaVertical)
          { 
             GetFractalinMICRO(FractalAnterior, FractalValido); 
@@ -124,12 +126,20 @@ void OnTick()
          //Cerrar ordenes mercado.
          if (SalidaPatronImpulsoOnda3M32(FractalAnterior, Direccion))  
          {
-            
+            // Cierre por TP lógico (condición de salida)
+            string commentSalida = Par + "-P1";
+            int cerradas = CierreOrdenes(commentSalida);
+   
+            // Reset de estado si ya no quedan órdenes con ese comentario
+            if (cerradas > 0)
+            {
+               ActivadoPatronImpulsoOnda3M32 = false;
+               LecturaMercado = true;
+               EntradaMercado = false;
+               SalidaMercado = false;               
+            }
          } 
       }
-      LecturaMercado = true;
-      EntradaMercado = false;
-      SalidaMercado = false;
    }
 }
 
@@ -360,15 +370,17 @@ void GetLastFractalsHistory(int lookback = 1)
       if (up > 0)
       {
          Fractal = up;
+         bool dummy=false;
          if (PintarLineaVertical) 
-            GetFractalinMICRO(Fractal, FractalValido);  
+            GetFractalinMICRO(Fractal, dummy);  
          contador++;          
       }
       else if (dn > 0)
       {
          Fractal = dn;
+         bool dummy=false;
          if (PintarLineaVertical) 
-            GetFractalinMICRO(Fractal, FractalValido);
+            GetFractalinMICRO(Fractal, dummy);
          contador++;
       }      
       
