@@ -15,7 +15,13 @@ input ENUM_TIMEFRAMES PeriodoFractal = PERIOD_M30;
 input bool PintarHistorico = true;
 input int  NumeroFractalesPintarHistorico = 20;
 input bool PintarLineaVertical = true;
-input bool Real = false;
+input bool  Real = false;
+input bool  PintarSeparadoresDia   = true;
+input int   DiasSeparadoresHist    = 3;           // cuántos días hacia atrás
+input color ColorSeparadorDia      = clrDimGray;
+input int   EstiloSeparadorDia     = STYLE_DOT;
+input int   AnchoSeparadorDia      = 3;
+
 
 //Variables Globales
 int MV32 = 32;
@@ -29,6 +35,7 @@ bool FractalValido = false;
 bool LecturaMercado = true;
 bool EntradaMercado = false;
 bool SalidaMercado = false;
+datetime t_PeriodoFractal;
 
 //ZigZag
 double   ZZAux[];
@@ -62,6 +69,9 @@ int OnInit()
       PintarUnaVez = true;
    }
    
+   if(PintarSeparadoresDia)
+      DrawDailySeparators(DiasSeparadoresHist);
+   
 //---
    return(INIT_SUCCEEDED);
   }
@@ -72,9 +82,12 @@ void OnTick()
 {
 //---
 
+   if(PintarSeparadoresDia)
+      EnsureTodaySeparator();
+
    if (LecturaMercado)
    {
-      FractalNuevo = GetLastFractalNow(Direccion);
+      FractalNuevo = GetLastFractalNow(Direccion, t_PeriodoFractal);
       
       if (FractalNuevo != FractalAnterior)
       {
@@ -86,7 +99,7 @@ void OnTick()
          
          if (PintarLineaVertical)
          { 
-            GetFractalinMICRO(FractalAnterior, FractalValido); 
+            GetFractalinMICRO(FractalAnterior, FractalValido, t_PeriodoFractal); 
          } 
 
          //Con el nuevo fractal, valido, procedo a buscar nuevas oportunidades de negocio.  
@@ -315,7 +328,7 @@ bool DirCCI(ENUM_TIMEFRAMES tf, int dir)
 }
 
 //+------------------------------------------------------------------+
-double GetLastFractalNow(int &DireccionActual)
+double GetLastFractalNow(int &DireccionActual, datetime &t_TimeFractal)
 {
    int dir = DIR_NODIR;
    int contador = 0;
@@ -333,12 +346,14 @@ double GetLastFractalNow(int &DireccionActual)
       if (up > 0)
       {
          Fractal = up;
+         t_TimeFractal = iTime(Par, tfconvertido, i);           
          DireccionActual = DIR_CORTOS;
          contador++;          
       }
       else if (dn > 0)
       {
          Fractal = dn;
+         t_TimeFractal = iTime(Par, tfconvertido, i);           
          DireccionActual = DIR_LARGOS; 
          contador++;
       }      
@@ -371,16 +386,20 @@ void GetLastFractalsHistory(int lookback = 1)
       {
          Fractal = up;
          bool dummy=false;
+         datetime t_Fractal = iTime(Par, tfconvertido, i); 
+          
          if (PintarLineaVertical) 
-            GetFractalinMICRO(Fractal, dummy);  
+            GetFractalinMICRO(Fractal, dummy, t_Fractal);  
          contador++;          
       }
       else if (dn > 0)
       {
          Fractal = dn;
          bool dummy=false;
+         datetime t_Fractal = iTime(Par, tfconvertido, i);  
+         
          if (PintarLineaVertical) 
-            GetFractalinMICRO(Fractal, dummy);
+            GetFractalinMICRO(Fractal, dummy, t_Fractal);
          contador++;
       }      
       
@@ -390,7 +409,7 @@ void GetLastFractalsHistory(int lookback = 1)
    }   
 }
 
-void GetFractalinMICRO(double Price, bool &FValido)
+void GetFractalinMICRO(double Price, bool &FValido, datetime tPeriodoFractal)
 {
    // Recorremos barras desde la más reciente (shift=0) hacia atrás
    int tfconvertido = ConversorTF(PeriodoMICRO);   
@@ -404,11 +423,10 @@ void GetFractalinMICRO(double Price, bool &FValido)
    
       
       if (NormalizeDouble(up, Digitos) == NormalizeDouble(Price, Digitos))
-      {
-         // ← aquí obtienes la hora/minuto/segundo del fractal M1 (vela central del patrón)
-         datetime t_m1 = iTime(Par, tfconvertido, i);  
-         
-         if (IsExactZigZagM1At(Price, t_m1, 32, 5, 3)) 
+      {  
+         datetime t_m1 = 0;
+               
+         if (FindZigZagInWindow(Price, tPeriodoFractal, PeriodoMICRO, t_m1, 32, 5, 3)) 
          {
             DrawVLine(t_m1, clrRed);
             FValido = true;
@@ -423,10 +441,9 @@ void GetFractalinMICRO(double Price, bool &FValido)
       }
       else if (NormalizeDouble(dn, Digitos) == NormalizeDouble(Price, Digitos))
       {
-         // ← aquí obtienes la hora/minuto/segundo del fractal M1 (vela central del patrón)
-         datetime t_m1 = iTime(Par, tfconvertido, i);  
-          
-         if (IsExactZigZagM1At(Price, t_m1, 32, 5, 3)) 
+         datetime t_m1 = 0;
+
+         if (FindZigZagInWindow(Price, tPeriodoFractal, PeriodoMICRO, t_m1, 32, 5, 3)) 
          {
             DrawVLine(t_m1, clrGreen);
             FValido = true;            
@@ -442,6 +459,37 @@ void GetFractalinMICRO(double Price, bool &FValido)
    }
 }
 
+bool FindZigZagInWindow(double priceTarget,
+                        datetime tFractalTF,   // tiempo de la barra M30 del fractal
+                        ENUM_TIMEFRAMES tfMicro,
+                        datetime &t_Micro,
+                        int depth=32, int dev=5, int back=3)
+{
+   int     tfm    = ConversorTF(tfMicro);
+   datetime tBeg  = tFractalTF;                                   // inicio barra M30
+   datetime tEnd  = tFractalTF + PeriodSeconds(PeriodoFractal);   // fin barra M30
+   t_Micro = 0;
+   
+   // empezamos en la barra M1 más cercana a tEnd-1 (para incluir todo el tramo)
+   int shift = iBarShift(Par, tfm, tEnd - 1, true);
+   if(shift < 0) return false;
+
+   for(int s = shift; s < iBars(Par, tfm); s++)
+   {
+      datetime tt = iTime(Par, tfm, s);
+      if(tt < tBeg) break;                // ya salimos por el principio de la ventana
+      if(tt >= tEnd) continue;            // estamos por delante; retrocede
+
+      double zz = iCustom(Par, tfm, "ZigZag", depth, dev, back, 0, s);
+      if ((zz != 0.0) && (zz == priceTarget))
+      {
+         t_Micro = tt;
+         return true;
+      }
+   }
+   
+   return false;
+}
 // ===================== ZigZag (núcleo con arrays ZZAux/ZZAuxTime) ======================
 void ZigZag(string sMarket, ENUM_TIMEFRAMES iPeriodo, int ZZPeriodo, int iIteraciones)
 {
@@ -470,28 +518,6 @@ void ZigZag(string sMarket, ENUM_TIMEFRAMES iPeriodo, int ZZPeriodo, int iIterac
       i++;
       if (i > 3000) bSalida = true;
    }
-}
-
-
-bool IsExactZigZagM1At(double Price, datetime t_m1, int zzDepth=32, int zzDeviation=5, int zzBackstep=3)
-{
-
-   int tfconvertido = ConversorTF(PeriodoMICRO);   
-   int shift = iBarShift(Par, tfconvertido, t_m1, true);
-   if(shift < 0) return false;
-
-   
-   // Buffer 0 = precio en vértices (sirve para UP y DOWN)
-   double zz = iCustom(Par, tfconvertido, "ZigZag",
-                       zzDepth, zzDeviation, zzBackstep,
-                       0, shift);
-
-   if(zz == 0.0 || zz == EMPTY_VALUE) 
-   {  
-      return false;
-   }
-   
-   return (true);
 }
 
 void DrawVLine(datetime t_m1, color c=clrDodgerBlue)
@@ -547,7 +573,6 @@ void DeleteAllPoints()
       }
    }
 }
-
 
 // Punto genérico en el tiempo y precio indicados (usa un "bullet" Wingdings 159)
 void PlotPointAt(double price, color c)
@@ -656,4 +681,38 @@ int CierreOrdenes(string targetComment)
    }
    
    return(contador);   
+}
+
+void DrawDaySeparator(datetime dayOpen)
+{
+   string name = StringFormat("DaySep_%s_%s", Par, TimeToString(dayOpen, TIME_DATE));
+   if(ObjectFind(0, name) >= 0) return;
+
+   ObjectCreate(0, name, OBJ_VLINE, 0, dayOpen, 0);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, ColorSeparadorDia);
+   ObjectSetInteger(0, name, OBJPROP_STYLE, EstiloSeparadorDia);
+   ObjectSetInteger(0, name, OBJPROP_WIDTH, AnchoSeparadorDia);
+}
+
+// Pinta N días hacia atrás usando las velas D1
+void DrawDailySeparators(int days_back)
+{
+   if(!PintarSeparadoresDia) return;
+
+   for(int i=0; i<days_back; i++)
+   {
+      datetime dOpen = iTime(Par, PERIOD_D1, i);
+      if(dOpen <= 0) break;
+      DrawDaySeparator(dOpen);
+   }
+}
+
+// Asegura que el separador del día (hoy) existe
+void EnsureTodaySeparator()
+{
+   if(!PintarSeparadoresDia) return;
+
+   datetime todayOpen = iTime(Par, PERIOD_D1, 0);
+   if(todayOpen > 0)
+      DrawDaySeparator(todayOpen);
 }
