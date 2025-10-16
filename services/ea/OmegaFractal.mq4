@@ -13,12 +13,12 @@ input ENUM_TIMEFRAMES PeriodoMESO = PERIOD_M5;
 input ENUM_TIMEFRAMES PeriodoFractal = PERIOD_M30;
 
 input bool  PintarHistorico = true;
-input int   NumeroFractalesPintarHistorico = 20;
+input int   NumeroFractalesPintarHistorico = 40;
 input bool  PintarLineaVertical = true;
-input bool  Real = false;
-input bool  Backtesting = false;
+input bool  Ejecutar_Operaciones = true; 
+input bool  Backtesting = true; 
 input bool  PintarSeparadoresDia   = true;
-input int   DiasSeparadoresHist    = 3;           // cuántos días hacia atrás
+input int   DiasSeparadoresHist    = 4;           // cuántos días hacia atrás
 input color ColorSeparadorDia      = clrDimGray;
 input int   EstiloSeparadorDia     = STYLE_DOT;
 input int   AnchoSeparadorDia      = 3;
@@ -30,13 +30,15 @@ int MV8 = 8;
 string Par = Symbol();
 int Digitos = (int)MarketInfo(Par, MODE_DIGITS);
 bool PintarUnaVez = false;
-double FractalNuevo = 0;
-double FractalAnterior = 0;
+double FractalLeido = 0;
+double FractalActual = 0;
 bool FractalValido = false;
 bool LecturaMercado = true;
 bool EntradaMercado = false;
 bool SalidaMercado = false;
+bool Trazas = false;
 datetime t_PeriodoFractal;
+double StopLoss = 0;
 
 //ZigZag
 double   ZZAux[];
@@ -61,7 +63,8 @@ bool ActivadoPatronImpulsoOnda3M32 = false;
 int OnInit()
   {
 //---
-   if ((!Backtesting) && (PintarHistorico) && (PintarLineaVertical) && (!PintarUnaVez))
+
+   if ((PintarHistorico) && (PintarLineaVertical) && (!PintarUnaVez))
    {
       // Borra todas las OBJ_VLINE del gráfico (todas las subventanas)
       DeleteAllVLines();
@@ -86,67 +89,126 @@ void OnTick()
    if(PintarSeparadoresDia)
       EnsureTodaySeparator();
 
+   FractalLeido = GetLastFractalNow(Direccion, t_PeriodoFractal);
+
+   Traza1 = "\n" + NowHMSStr() + " Fractal Leido: " + DoubleToStr(FractalLeido, Digitos);
+   
    if (LecturaMercado)
-   {
-      FractalNuevo = GetLastFractalNow(Direccion, t_PeriodoFractal);
-      
-      if (FractalNuevo != FractalAnterior)
+   {      
+      if (FractalLeido != FractalActual)
       {
          //Encontramos nuevo fractal y pintamos linea correspondiente para ayuda visual
          //en la lectura.
          
-         FractalAnterior = FractalNuevo;
+         FractalActual = FractalLeido;
+         Traza1 = Traza1 + "\n" + NowHMSStr() + " Fractal Actual: " + DoubleToStr(FractalActual, Digitos);
+
          FractalValido = false;
+         Traza1 = Traza1 + "\n" + NowHMSStr() + " PintarLineaVertical: " + DoubleToStr(PintarLineaVertical, Digitos);
          
          if (PintarLineaVertical)
          { 
-            GetFractalinMICRO(FractalAnterior, FractalValido, t_PeriodoFractal); 
+            if (GetFractalinMICRO(FractalActual, FractalValido, t_PeriodoFractal))
+            {
+               Traza1 = Traza1 + "\n" + NowHMSStr() + " FractalinMicro: True"; 
+               Traza1 = Traza1 + "\n" + NowHMSStr() + " Fractal Valido: " + DoubleToStr(FractalValido, Digitos);     
+            }
+            else
+            {
+               Traza1 = Traza1 + "\n" + NowHMSStr() + " FractalinMICRO: False";                  
+            }
          } 
-
-         //Con el nuevo fractal, valido, procedo a buscar nuevas oportunidades de negocio.  
-         if ((FractalValido) && (Real))
-         {    
-            LecturaMercado = false;
-            EntradaMercado = true;
-            SalidaMercado = false;
-         }
-
       }
+      else if ((FractalLeido == FractalActual) && (FractalValido))
+      {
+         //Con el nuevo fractal, valido, procedo a buscar nuevas oportunidades de negocio.  
+         Traza1 = "\n" + NowHMSStr() + " Fractal Leido - Actual: " + DoubleToStr(FractalActual, Digitos);
+         
+         //Busqueda de oportunidad de negocio: PatronImpulsoOnda3M32
+         if (PatronImpulsoOnda3M32(FractalActual, Direccion, StopLoss))
+         {
+            ActivadoPatronImpulsoOnda3M32 = true; 
+            Traza1 = Traza1 + "\n" + NowHMSStr() + " PatronImpulsoOnda3M32: True ";            
+
+            if (Ejecutar_Operaciones)
+            {
+               LecturaMercado = false;
+               EntradaMercado = true;
+               SalidaMercado = false;
+            }           
+         }      
+      }
+      
+      Comment(Traza1);
    }
    else if (EntradaMercado)
-   {
-      double StopLoss = 0;
-      
-      //Busqueda de oportunidades de negocio.
-      if (PatronImpulsoOnda3M32(FractalAnterior, Direccion, StopLoss))
-      {
-         //Ejecutas orden en el mercado
-         if (ExecMarket(Direccion, 1, StopLoss, 0.1, Par + "-P1") > 0)
+   {      
+      Traza1 = Traza1 + "\n" + NowHMSStr() + " EntradaMercado: True ";                        
+
+      if (ActivadoPatronImpulsoOnda3M32) 
+      {      
+         Traza1 = Traza1 + "\n" + NowHMSStr() + " Patron encontrado: PatronImpulsoOnda3M32 "; 
+         
+         double Lote = 0;
+         
+         if (Backtesting)
          {
+            Lote = MarketInfo(Par, MODE_MINLOT);      
+         }
+         else
+         {
+            Lote = 0.1;
+         }                       
+         
+         int OperacionesEjecutadas = ExecMarket(Direccion, 1, StopLoss, Lote, Par + "-P1");
+         
+         //Ejecutas orden en el mercado
+         if  (OperacionesEjecutadas > 0)
+         {
+            Traza1 = Traza1 + "\n" + NowHMSStr() + " OperacionesEjecutadas: " + IntegerToString(OperacionesEjecutadas);                        
             LecturaMercado = false;
             EntradaMercado = false;
             SalidaMercado = true;
-            ActivadoPatronImpulsoOnda3M32 = true;            
          }
       }
+
+      Comment(Traza1);
+      
    }
    else if (SalidaMercado)
    {
       //Verificar que todas las operaciones se cerraron
       //damos paso a la lectura del mercado
+      Traza1 =  Traza1 + "\n" + NowHMSStr() + " SalidaMercado True: ";                        
       
       if (ActivadoPatronImpulsoOnda3M32)
       {
-         //Cerrar ordenes mercado.
-         if (SalidaPatronImpulsoOnda3M32(FractalAnterior, Direccion))  
+         //La salida puede ser por:
+         // SL: Salida controlado por el sistema. Tengo que verificar que se cerraron las operaciones abiertas.
+         // SalidaPatronImpulsoOnda3M32: Salida controlada por mi.         
+         string commentSalida = Par + "-P1";
+
+         //Salida: SL
+         if (CountOpenOrdersByComment(commentSalida) == 0)
+         {
+            Traza1 = Traza1 + "\n" + NowHMSStr() + " Salida SL: Operacion cerradas por StopLoss ";                        
+            ActivadoPatronImpulsoOnda3M32 = false;
+            LecturaMercado = true;
+            EntradaMercado = false;
+            SalidaMercado = false;                           
+         }
+         
+         //Salida PatronImpulsoOnda3M32: Cerrar ordenes mercado controlado por mi.
+         if (SalidaPatronImpulsoOnda3M32(FractalActual, Direccion))  
          {
             // Cierre por TP lógico (condición de salida)
-            string commentSalida = Par + "-P1";
             int cerradas = CierreOrdenes(commentSalida);
    
             // Reset de estado si ya no quedan órdenes con ese comentario
             if (cerradas > 0)
             {
+               Traza1 = Traza1 + "\n" + NowHMSStr() + " SalidaPatronImpulsoOnda3M32: " + IntegerToString(cerradas);                        
+
                ActivadoPatronImpulsoOnda3M32 = false;
                LecturaMercado = true;
                EntradaMercado = false;
@@ -154,6 +216,8 @@ void OnTick()
             }
          } 
       }
+
+      Comment(Traza1);
    }
 }
 
@@ -410,19 +474,19 @@ void GetLastFractalsHistory(int lookback = 1)
    }   
 }
 
-void GetFractalinMICRO(double Price, bool &FValido, datetime tPeriodoFractal)
+bool GetFractalinMICRO(double Price, bool &FValido, datetime tPeriodoFractal)
 {
    // Recorremos barras desde la más reciente (shift=0) hacia atrás
    int tfconvertido = ConversorTF(PeriodoMICRO);   
    int total = iBars(Par, tfconvertido);     
    FValido = false;
+   bool bEncontrado = false;
  
    for (int i = 0; i < total; i++)
    {
       double up  = iFractals(Par, tfconvertido, MODE_UPPER, i);
       double dn  = iFractals(Par, tfconvertido, MODE_LOWER, i);
-   
-      
+        
       if (NormalizeDouble(up, Digitos) == NormalizeDouble(Price, Digitos))
       {  
          datetime t_m1 = 0;
@@ -431,11 +495,13 @@ void GetFractalinMICRO(double Price, bool &FValido, datetime tPeriodoFractal)
          {
             DrawVLine(t_m1, clrRed);
             FValido = true;
+            bEncontrado = true;
          }
          else
          {
             DrawVLine(t_m1, clrOrange);
             FValido = false;
+            bEncontrado = true;
          }
          
          break;      
@@ -447,17 +513,22 @@ void GetFractalinMICRO(double Price, bool &FValido, datetime tPeriodoFractal)
          if (FindZigZagInWindow(Price, tPeriodoFractal, PeriodoMICRO, t_m1, 32, 5, 3)) 
          {
             DrawVLine(t_m1, clrGreen);
-            FValido = true;            
+            FValido = true; 
+            bEncontrado = true;                       
          }           
          else
          {
             DrawVLine(t_m1, clrOrange);
             FValido = false;
+            bEncontrado = true;            
          }
             
          break;
       }
    }
+   
+   return(bEncontrado);
+   
 }
 
 bool FindZigZagInWindow(double priceTarget,
@@ -484,7 +555,8 @@ bool FindZigZagInWindow(double priceTarget,
       double zz = iCustom(Par, tfm, "ZigZag", depth, dev, back, 0, s);
       // Verificamos igualdad por precio entre
       //Zigzag PeriodoMiCRO con el valor del Fractal del PeriodoFractal
-      if ((zz != 0.0) && (zz == priceTarget))
+            
+      if ((zz != 0.0) && NormalizeDouble(zz, Digitos) == NormalizeDouble(priceTarget, Digitos))
       {
          t_Micro = tt;
 
@@ -493,7 +565,8 @@ bool FindZigZagInWindow(double priceTarget,
          double fUp = iFractals(Par, tfm, MODE_UPPER, s);
          double fDn = iFractals(Par, tfm, MODE_LOWER, s);
          
-         if ((fUp == priceTarget) || (fDn == priceTarget))
+         if ((NormalizeDouble(fUp, Digitos) == NormalizeDouble(priceTarget, Digitos)) 
+         || (NormalizeDouble(fDn, Digitos) == NormalizeDouble(priceTarget, Digitos)))
          {
             return true;
          }         
@@ -630,42 +703,78 @@ int ExecMarket(int dir, int maxOps, double sl = 0, double lots = 0.1, string com
    int    k          = 0;
    int    opened     = 0;
    double sl_price   = NormalizeDouble(sl, Digitos);
+
+   Traza1 = Traza1 + "\nDireccion: " + IntegerToString(dir) + " Operaciones maximas: " + IntegerToString(maxOps);
+   Traza1 = Traza1 + "\nSL: " + DoubleToString(sl) + " Lotes: " + DoubleToString(lots) + " Comentario: " + comment;
    
-   for(k=0; k<maxOps; k++)
+   double Lote_minimo = MarketInfo(Par, MODE_MINLOT);
+   double Lote_maximo = MarketInfo(Par, MODE_MAXLOT);
+   
+   if ((lots >= Lote_minimo) && (lots <= Lote_maximo))
    {
-      RefreshRates();
-      double price, tp;
-      int    type;
-      int magic = 31071974;
-
-      if(dir == DIR_LARGOS)
+      for(k=0; k<maxOps; k++)
       {
-         type  = OP_BUY;
-         price = NormalizeDouble(Ask, Digitos);
-         tp    = 0.0;
+         RefreshRates();
+         double price, tp;
+         int    type;
+         int magic = 31071974;
+   
+         if(dir == DIR_LARGOS)
+         {
+            type  = OP_BUY;
+            price = NormalizeDouble(Ask, Digitos);
+            tp    = 0.0;
+         }
+         else // DIR_CORTOS
+         {
+            type  = OP_SELL;
+            price = NormalizeDouble(Bid, Digitos);
+            tp    = 0.0;
+         }
+   
+         // Enviar orden
+         int ticket = OrderSend(Par, type, lots, price, slippage, sl_price, tp, comment, magic, 0, clrNONE);
+         if(ticket < 0)
+         {
+            // Si falla, intentamos seguir con el resto (por si es un fallo puntual)
+            // Puedes loguear el error:
+            Traza1 = Traza1 + "\nOrderSend: " + IntegerToString(GetLastError());
+         }
+         else
+         {
+            Traza1 = Traza1 + "\nTicket: " + IntegerToString(ticket);         
+            opened++;
+         }
       }
-      else // DIR_CORTOS
-      {
-         type  = OP_SELL;
-         price = NormalizeDouble(Bid, Digitos);
-         tp    = 0.0;
-      }
-
-      // Enviar orden
-      int ticket = OrderSend(Par, type, lots, price, slippage, sl_price, tp, comment, magic, 0, clrNONE);
-      if(ticket < 0)
-      {
-         // Si falla, intentamos seguir con el resto (por si es un fallo puntual)
-         // Puedes loguear el error:
-         Print("OrderSend error: ", GetLastError());
-      }
-      else
-         opened++;
+   
+      Traza1 = Traza1 + "\nOperaciones Abiertas: " + IntegerToString(opened);         
+   
    }
-
+   else
+   {
+      Traza1 = Traza1 + "\nActualizar Lote actual: " + DoubleToStr(lots, Digitos) + " Lote minimo: " + DoubleToStr(Lote_minimo) + " Lote maximo: " + DoubleToStr(Lote_maximo);               
+   }
+     
    return (opened);
+   
 }
 
+// Cuenta cuántas órdenes ABIERTAS hay con un comentario EXACTO (y del símbolo actual)
+int CountOpenOrdersByComment(string targetComment)
+{
+   RefreshRates();
+   int count = 0;
+
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
+      {
+         if(OrderComment() == targetComment)
+            count++;
+      }
+   }
+   return count;
+}
 
 int CierreOrdenes(string targetComment)
 {
@@ -727,4 +836,9 @@ void EnsureTodaySeparator()
    datetime todayOpen = iTime(Par, PERIOD_D1, 0);
    if(todayOpen > 0)
       DrawDaySeparator(todayOpen);
+}
+
+string NowHMSStr()
+{
+   return TimeToString(TimeCurrent(), TIME_SECONDS); // "YYYY.MM.DD HH:MM:SS"
 }
