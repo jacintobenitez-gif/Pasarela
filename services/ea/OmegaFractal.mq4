@@ -290,6 +290,7 @@ bool PatronImpulsoOnda3M32(double dFractal, int dir, double &sl)
                //Trigger Operacion Largos
                bPatronOnda3M32 = true;
                sl = ZZR0;
+               DrawOmega(t_Micro, ZZR0, 50, clrGold, 32);               
             } 
             else
             {
@@ -346,6 +347,7 @@ bool PatronImpulsoOnda3M32(double dFractal, int dir, double &sl)
                //Trigger Operacion Largos
                bPatronOnda3M32 = true;
                sl = ZZR0;
+               DrawOmega(t_Micro, ZZR0, 50, clrGold, 32);
             } 
             else
             {
@@ -824,90 +826,21 @@ string NowHMSStr()
    return TimeToString(TimeCurrent(), TIME_SECONDS); // "YYYY.MM.DD HH:MM:SS"
 }
 
+void DrawOmega(datetime t, double price, int offsetPoints=50, color col=clrGold, int fontSize=32)
+{
+
+   double p    = NormalizeDouble(price - offsetPoints*Point, Digitos);
+
+   string base = StringFormat("OMEGA_%s_%d", Par, (int)t);
+   string name = base; static int seq=0;
+   while(ObjectFind(0, name) >= 0) { seq++; name = StringFormat("%s_%d", base, seq); }
+
+   ObjectCreate(0, name, OBJ_TEXT, 0, t, p);
+   ObjectSetText(name, "Ω", fontSize, "Arial", col);
+   ObjectSetInteger(0, name, OBJPROP_BACK, false);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+}
+
 
 
 //------------------------BORRAR A FUTURO-------------------------
-// Devuelve la dirección según Williams %R (periodo 8) en el TF indicado.
-// - Si WPR >= -20  y dir==DIR_LARGOS -> true
-// - Si WPR <= -80  y dir==DIR_CORTOS -> true
-// - En otro caso -> false
-bool DirWPR(ENUM_TIMEFRAMES tf, int dir)
-{
-   int tfconvertido = ConversorTF(tf);
-   int period = 8; // estándar de Williams %R
-   double wpr = iWPR(Par, tfconvertido, period, 0); // barra actual
-
-   if(wpr == EMPTY_VALUE) 
-      return false;
-
-   if((dir == DIR_LARGOS) && (wpr >= -20.0))
-      return true;
-
-   if((dir == DIR_CORTOS) && (wpr <= -80.0))
-      return true;
-
-   return false;
-}
-
-// Devuelve la dirección según CCI (periodo 8) en el TF indicado.
-// - Si CCI >=  +100 y dir==DIR_LARGOS -> true
-// - Si CCI <=  -100 y dir==DIR_CORTOS -> true
-// - En otro caso -> false
-bool DirCCI(ENUM_TIMEFRAMES tf, int dir)
-{
-   int tfconvertido = ConversorTF(tf);
-   int period = 8; // estándar CCI
-   double cci = iCCI(Par, tfconvertido, period, PRICE_TYPICAL, 0); // barra actual
-
-   if(cci == EMPTY_VALUE)
-      return false;
-
-   if((dir == DIR_LARGOS) && (cci >= 100.0))
-      return true;
-
-   if((dir == DIR_CORTOS) && (cci <= -100.0))
-      return true;
-
-   return false;
-}
-
-// Punto genérico en el tiempo y precio indicados (usa un "bullet" Wingdings 159)
-void PlotPointAt(double price, color c)
-{
-   double   p   = NormalizeDouble(price, Digitos);
-   datetime tt  = TimeCurrent();
-
-   // nombre robusto: Symbol + epoch + contador si ya existe
-   static int seq = 0;
-   string base = StringFormat("%s_%s_%d", "PT", Par, (int)tt);
-   string name = base;
-
-   // evita colisión si pintas varios en el mismo segundo
-   while(ObjectFind(0, name) >= 0)
-   { 
-      seq++; 
-      name = StringFormat("%s_%d", base, seq); 
-   }
-
-   ObjectCreate(0, name, OBJ_ARROW, 0, tt, p);
-   ObjectSetInteger(0, name, OBJPROP_COLOR, c);
-   ObjectSetInteger(0, name, OBJPROP_WIDTH, 4);
-   ObjectSetInteger(0, name, OBJPROP_ARROWCODE, 159);     // bullet
-   ObjectSetInteger(0, name, OBJPROP_BACK, false);        // delante
-   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);  // no seleccionable
-   
-}
-
-void DeleteAllPoints()
-{
-   for(int i = ObjectsTotal()-1; i >= 0; i--)
-   {
-      string name = ObjectName(i);
-      if(ObjectType(name) == OBJ_ARROW)
-      {
-         int code = (int)ObjectGetInteger(0, name, OBJPROP_ARROWCODE);
-         if(code == 159)   // nuestro "bullet" Wingdings
-            ObjectDelete(0, name);
-      }
-   }
-}
