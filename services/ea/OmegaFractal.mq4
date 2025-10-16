@@ -15,7 +15,7 @@ input ENUM_TIMEFRAMES PeriodoFractal = PERIOD_M30;
 input bool  PintarHistorico = true;
 input int   NumeroFractalesPintarHistorico = 40;
 input bool  PintarLineaVertical = true;
-input bool  Ejecutar_Operaciones = true; 
+input bool  Ejecutar_Operaciones = false; 
 input bool  Backtesting = true; 
 input bool  PintarSeparadoresDia   = true;
 input int   DiasSeparadoresHist    = 4;           // cuántos días hacia atrás
@@ -25,8 +25,10 @@ input int   AnchoSeparadorDia      = 3;
 
 
 //Variables Globales
-int MV32 = 32;
-int MV8 = 8;
+int MV32_Depth = 32;
+int MV8_Depth = 8;
+int Deviation = 5;
+int Backstep = 3;
 string Par = Symbol();
 int Digitos = (int)MarketInfo(Par, MODE_DIGITS);
 bool PintarUnaVez = false;
@@ -56,6 +58,7 @@ string Traza2 = "";
 
 //Patrones
 bool ActivadoPatronImpulsoOnda3M32 = false;
+bool ConfirmacionFractalesMICROyMESOalineados = false;
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -68,7 +71,6 @@ int OnInit()
    {
       // Borra todas las OBJ_VLINE del gráfico (todas las subventanas)
       DeleteAllVLines();
-      DeleteAllPoints();
       GetLastFractalsHistory(NumeroFractalesPintarHistorico);
       PintarUnaVez = true;
    }
@@ -89,7 +91,7 @@ void OnTick()
    if(PintarSeparadoresDia)
       EnsureTodaySeparator();
 
-   FractalLeido = GetLastFractalNow(Direccion, t_PeriodoFractal);
+   FractalLeido = GetLastFractalNow(PeriodoFractal, Direccion, t_PeriodoFractal);
 
    Traza1 = "\n" + NowHMSStr() + " Fractal Leido: " + DoubleToStr(FractalLeido, Digitos);
    
@@ -146,7 +148,9 @@ void OnTick()
       Traza1 = Traza1 + "\n" + NowHMSStr() + " EntradaMercado: True ";                        
 
       if (ActivadoPatronImpulsoOnda3M32) 
-      {      
+      { 
+         //Reset
+         ConfirmacionFractalesMICROyMESOalineados = false;     
          Traza1 = Traza1 + "\n" + NowHMSStr() + " Patron encontrado: PatronImpulsoOnda3M32 "; 
          
          double Lote = 0;
@@ -233,12 +237,16 @@ bool PatronImpulsoOnda3M32(double dFractal, int dir, double &sl)
    sl = 0;
    
    //Leyendo las ultima posición del periodo MICRO
-   ZigZag(Par, PeriodoMICRO, MV32, 4);
+   ZigZag(Par, PeriodoMICRO, MV32_Depth, 4);
    // justo después de ZigZag(Par, PeriodoMICRO, MV32, 4);
    if(ZZAux[0] == 0.0 || ZZAux[1] == 0.0 || ZZAux[2] == 0.0) return false;
    
+   Traza1 = Traza1 + "\nPatronImpulsoOnda3M32";
+   
    if (dir == DIR_LARGOS)
    {
+      Traza1 = Traza1 + "\nPatronImpulsoOnda3M32: LARGOS";
+
       if ((ZZAux[2] == dFractal) && (ZZAux[0] < ZZAux[1]) 
       && (ZZAux[1] > ZZAux[2]))
       {
@@ -248,25 +256,53 @@ bool PatronImpulsoOnda3M32(double dFractal, int dir, double &sl)
 
          //Leyendo las ultima posición del PeriodoMESO
          //para comparar las con las ondas M32 del PeriodoMICRO
-         ZigZag(Par, PeriodoMESO, MV8, 3);
-         // tras ZigZag(Par, PeriodoMESO, MV8, 3);
+         ZigZag(Par, PeriodoMESO, MV8_Depth, 3);
          if(ZZAux[0] == 0.0 || ZZAux[1] == 0.0 || ZZAux[2] == 0.0) return false;
-
          
          if ((ZZR0 == ZZAux[0]) && (ZZR1 == ZZAux[1]) && (ZZR2 == ZZAux[2]))
          {
+            Traza1 = Traza1 + "\nPatronImpulsoOnda3M32: Detectada ONDA2";
+
             //ONDA 2
-            if (DirEMA1vsEMA5(PeriodoMICRO, dir) && DirWPR(PeriodoMICRO, dir) && DirCCI(PeriodoMICRO, dir))
+            datetime t_Meso = 0;
+            datetime t_Micro = 0;
+            int DireccionMeso = 0;
+            
+            double FractalMeso = GetLastFractalNow(PeriodoMESO, DireccionMeso, t_Meso);
+ 
+            if (!ConfirmacionFractalesMICROyMESOalineados)
             {
+               if (FindZigZagInWindow(PeriodoMESO, FractalMeso, t_Meso, PeriodoMICRO, t_Micro))
+               {
+                  Traza1 = Traza1 + "\nPatronImpulsoOnda3M32: Fractales MICRO y MESO SI alineados";
+                  ConfirmacionFractalesMICROyMESOalineados = true;
+               } 
+               else
+               {
+                  Traza1 = Traza1 + "\nPatronImpulsoOnda3M32: Fractales MICRO y MESO NO alineados";               
+               } 
+            }
+                  
+            if ((ConfirmacionFractalesMICROyMESOalineados) 
+            && ((DirEMA1vsEMA5(PeriodoMICRO, dir)) && (DirEMA1vsEMA5(PeriodoMESO, dir))))
+            {
+               Traza1 = Traza1 + "\nPatronImpulsoOnda3M32: Patrón confirmado";        
                //Trigger Operacion Largos
                bPatronOnda3M32 = true;
                sl = ZZR0;
-            }         
+            } 
+            else
+            {
+               Traza1 = Traza1 + "\nPatronImpulsoOnda3M32: Direccion MICRO y MESO: No alineadas";        
+               return false;
+            }                    
          }         
       }
    }
    else if (dir == DIR_CORTOS)
    {
+      Traza1 = Traza1 + "\nPatronImpulsoOnda3M32: CORTOS";
+
       if ((ZZAux[2] == dFractal) && (ZZAux[0] > ZZAux[1]) 
       && (ZZAux[1] < ZZAux[2]))
       {
@@ -276,19 +312,46 @@ bool PatronImpulsoOnda3M32(double dFractal, int dir, double &sl)
 
          //Leyendo las ultima posición del PeriodoMESO
          //para comparar las con las ondas M32 del PeriodoMICRO
-         ZigZag(Par, PeriodoMESO, MV8, 3);
-         // tras ZigZag(Par, PeriodoMESO, MV8, 3);
+         ZigZag(Par, PeriodoMESO, MV8_Depth, 3);
          if(ZZAux[0]==0.0 || ZZAux[1]==0.0 || ZZAux[2]==0.0) return false;
          
          if ((ZZR0 == ZZAux[0]) && (ZZR1 == ZZAux[1]) && (ZZR2 == ZZAux[2]))
          {
+            Traza1 = Traza1 + "\nPatronImpulsoOnda3M32: Detectada ONDA2";
+
             //ONDA 2
-            if (DirEMA1vsEMA5(PeriodoMICRO, dir) && DirWPR(PeriodoMICRO, dir) && DirCCI(PeriodoMICRO, dir))
+            datetime t_Meso = 0;
+            datetime t_Micro = 0;
+            int DireccionMeso = 0;
+            
+            double FractalMeso = GetLastFractalNow(PeriodoMESO, DireccionMeso, t_Meso);
+
+            if (!ConfirmacionFractalesMICROyMESOalineados)
             {
+               if (FindZigZagInWindow(PeriodoMESO, FractalMeso, t_Meso, PeriodoMICRO, t_Micro))
+               {
+                  Traza1 = Traza1 + "\nPatronImpulsoOnda3M32: Fractales MICRO y MESO SI alineados";
+                  ConfirmacionFractalesMICROyMESOalineados = true;
+               } 
+               else
+               {
+                  Traza1 = Traza1 + "\nPatronImpulsoOnda3M32: Fractales MICRO y MESO NO alineados";               
+               } 
+            }
+                        
+            if ((ConfirmacionFractalesMICROyMESOalineados) 
+            && ((DirEMA1vsEMA5(PeriodoMICRO, dir)) && (DirEMA1vsEMA5(PeriodoMESO, dir))))
+            {
+               Traza1 = Traza1 + "\nPatronImpulsoOnda3M32: Patrón confirmado";        
                //Trigger Operacion Largos
                bPatronOnda3M32 = true;
                sl = ZZR0;
-            }         
+            } 
+            else
+            {
+               Traza1 = Traza1 + "\nPatronImpulsoOnda3M32: Direccion MICRO y MESO: No alineadas";        
+               return false;
+            }                    
          }         
       }
    }
@@ -301,7 +364,7 @@ bool SalidaPatronImpulsoOnda3M32(double dFractal, int dir)
    bool bSalidaPatronImpulsoOnda3M32 = false;
 
    //Leyendo las ultima posición del periodo MICRO
-   ZigZag(Par, PeriodoMICRO, MV32, 4);
+   ZigZag(Par, PeriodoMICRO, MV32_Depth, 4);
 // después de ZigZag(Par, PeriodoMICRO, MV32, 4);
    if(ZZAux[0] == 0.0 || ZZAux[1] == 0.0 || ZZAux[2] == 0.0 || ZZAux[3] == 0.0) return false;
    
@@ -348,52 +411,8 @@ bool DirEMA1vsEMA5(ENUM_TIMEFRAMES tf, int dir)
 
 }
 
-// Devuelve la dirección según Williams %R (periodo 8) en el TF indicado.
-// - Si WPR >= -20  y dir==DIR_LARGOS -> true
-// - Si WPR <= -80  y dir==DIR_CORTOS -> true
-// - En otro caso -> false
-bool DirWPR(ENUM_TIMEFRAMES tf, int dir)
-{
-   int tfconvertido = ConversorTF(tf);
-   int period = 8; // estándar de Williams %R
-   double wpr = iWPR(Par, tfconvertido, period, 0); // barra actual
-
-   if(wpr == EMPTY_VALUE) 
-      return false;
-
-   if((dir == DIR_LARGOS) && (wpr >= -20.0))
-      return true;
-
-   if((dir == DIR_CORTOS) && (wpr <= -80.0))
-      return true;
-
-   return false;
-}
-
-// Devuelve la dirección según CCI (periodo 8) en el TF indicado.
-// - Si CCI >=  +100 y dir==DIR_LARGOS -> true
-// - Si CCI <=  -100 y dir==DIR_CORTOS -> true
-// - En otro caso -> false
-bool DirCCI(ENUM_TIMEFRAMES tf, int dir)
-{
-   int tfconvertido = ConversorTF(tf);
-   int period = 8; // estándar CCI
-   double cci = iCCI(Par, tfconvertido, period, PRICE_TYPICAL, 0); // barra actual
-
-   if(cci == EMPTY_VALUE)
-      return false;
-
-   if((dir == DIR_LARGOS) && (cci >= 100.0))
-      return true;
-
-   if((dir == DIR_CORTOS) && (cci <= -100.0))
-      return true;
-
-   return false;
-}
-
 //+------------------------------------------------------------------+
-double GetLastFractalNow(int &DireccionActual, datetime &t_TimeFractal)
+double GetLastFractalNow(ENUM_TIMEFRAMES Periodoaleer, int &DireccionActual, datetime &t_TimeFractal)
 {
    int dir = DIR_NODIR;
    int contador = 0;
@@ -401,7 +420,7 @@ double GetLastFractalNow(int &DireccionActual, datetime &t_TimeFractal)
    double Fractal = 0;
 
    // Recorremos barras desde la más reciente (shift=0) hacia atrás
-   int tfconvertido = ConversorTF(PeriodoFractal);
+   int tfconvertido = ConversorTF(Periodoaleer);
    int total = iBars(Par, tfconvertido);         
    for (int i = 0; i < total; i++)
    {
@@ -491,7 +510,7 @@ bool GetFractalinMICRO(double Price, bool &FValido, datetime tPeriodoFractal)
       {  
          datetime t_m1 = 0;
                
-         if (FindZigZagInWindow(Price, tPeriodoFractal, PeriodoMICRO, t_m1, 32, 5, 3)) 
+         if (FindZigZagInWindow(PeriodoFractal, Price, tPeriodoFractal, PeriodoMICRO, t_m1)) 
          {
             DrawVLine(t_m1, clrRed);
             FValido = true;
@@ -510,7 +529,7 @@ bool GetFractalinMICRO(double Price, bool &FValido, datetime tPeriodoFractal)
       {
          datetime t_m1 = 0;
 
-         if (FindZigZagInWindow(Price, tPeriodoFractal, PeriodoMICRO, t_m1, 32, 5, 3)) 
+         if (FindZigZagInWindow(PeriodoFractal, Price, tPeriodoFractal, PeriodoMICRO, t_m1)) 
          {
             DrawVLine(t_m1, clrGreen);
             FValido = true; 
@@ -531,15 +550,16 @@ bool GetFractalinMICRO(double Price, bool &FValido, datetime tPeriodoFractal)
    
 }
 
-bool FindZigZagInWindow(double priceTarget,
-                        datetime tFractalTF,   // tiempo de la barra M30 del fractal
+bool FindZigZagInWindow(ENUM_TIMEFRAMES tfBase,
+                        double priceTarget,
+                        datetime tFractalTF,   // tiempo de la barra del Periodo 
                         ENUM_TIMEFRAMES tfMicro,
-                        datetime &t_Micro,
-                        int depth=32, int dev=5, int back=3)
+                        datetime &t_Micro)
 {
    int     tfm    = ConversorTF(tfMicro);
-   datetime tBeg  = tFractalTF;                                   // inicio barra M30
-   datetime tEnd  = tFractalTF + PeriodSeconds(PeriodoFractal);   // fin barra M30
+   int     tfb    = ConversorTF(tfBase);
+   datetime tBeg  = tFractalTF;                        // inicio barra 
+   datetime tEnd  = tFractalTF + PeriodSeconds(tfb);   // fin barra 
    t_Micro = 0;
    
    // empezamos en la barra M1 más cercana a tEnd-1 (para incluir todo el tramo)
@@ -552,7 +572,7 @@ bool FindZigZagInWindow(double priceTarget,
       if(tt < tBeg) break;                // ya salimos por el principio de la ventana
       if(tt >= tEnd) continue;            // estamos por delante; retrocede
 
-      double zz = iCustom(Par, tfm, "ZigZag", depth, dev, back, 0, s);
+      double zz = iCustom(Par, tfm, "ZigZag", MV32_Depth, Deviation, Backstep, 0, s);
       // Verificamos igualdad por precio entre
       //Zigzag PeriodoMiCRO con el valor del Fractal del PeriodoFractal
             
@@ -593,7 +613,7 @@ void ZigZag(string sMarket, ENUM_TIMEFRAMES iPeriodo, int ZZPeriodo, int iIterac
    // Recorre desde la barra más reciente hacia atrás
    while ((n < iIteraciones) && (bSalida == false))
    {
-      zig = iCustom(sMarket, iPeriodo, "ZigZag", ZZPeriodo, 5, 3, 0, i);
+      zig = iCustom(sMarket, iPeriodo, "ZigZag", ZZPeriodo, Deviation, Backstep, 0, i);
       if(zig > 0.0)
       {
          ZZAux[n]     = zig;                         // precio pivote
@@ -645,48 +665,6 @@ void DeleteAllVLines()
    ObjectsDeleteAll(0, -1, OBJ_VLINE);
 }
 
-void DeleteAllPoints()
-{
-   for(int i = ObjectsTotal()-1; i >= 0; i--)
-   {
-      string name = ObjectName(i);
-      if(ObjectType(name) == OBJ_ARROW)
-      {
-         int code = (int)ObjectGetInteger(0, name, OBJPROP_ARROWCODE);
-         if(code == 159)   // nuestro "bullet" Wingdings
-            ObjectDelete(0, name);
-      }
-   }
-}
-
-// Punto genérico en el tiempo y precio indicados (usa un "bullet" Wingdings 159)
-void PlotPointAt(double price, color c)
-{
-   double   p   = NormalizeDouble(price, Digitos);
-   datetime tt  = TimeCurrent();
-
-   // nombre robusto: Symbol + epoch + contador si ya existe
-   static int seq = 0;
-   string base = StringFormat("%s_%s_%d", "PT", Par, (int)tt);
-   string name = base;
-
-   // evita colisión si pintas varios en el mismo segundo
-   while(ObjectFind(0, name) >= 0)
-   { 
-      seq++; 
-      name = StringFormat("%s_%d", base, seq); 
-   }
-
-   ObjectCreate(0, name, OBJ_ARROW, 0, tt, p);
-   ObjectSetInteger(0, name, OBJPROP_COLOR, c);
-   ObjectSetInteger(0, name, OBJPROP_WIDTH, 4);
-   ObjectSetInteger(0, name, OBJPROP_ARROWCODE, 159);     // bullet
-   ObjectSetInteger(0, name, OBJPROP_BACK, false);        // delante
-   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);  // no seleccionable
-   
-}
-
-
 // Abre X órdenes de mercado por dirección.
 // - dir: DIR_LARGOS o DIR_CORTOS
 // - maxOps: máximo de órdenes abiertas permitidas para esa dirección (símbolo actual)
@@ -703,6 +681,7 @@ int ExecMarket(int dir, int maxOps, double sl = 0, double lots = 0.1, string com
    int    k          = 0;
    int    opened     = 0;
    double sl_price   = NormalizeDouble(sl, Digitos);
+   color  clr        = clrWhite;
 
    Traza1 = Traza1 + "\nDireccion: " + IntegerToString(dir) + " Operaciones maximas: " + IntegerToString(maxOps);
    Traza1 = Traza1 + "\nSL: " + DoubleToString(sl) + " Lotes: " + DoubleToString(lots) + " Comentario: " + comment;
@@ -724,16 +703,18 @@ int ExecMarket(int dir, int maxOps, double sl = 0, double lots = 0.1, string com
             type  = OP_BUY;
             price = NormalizeDouble(Ask, Digitos);
             tp    = 0.0;
+            clr   = clrRed;
          }
          else // DIR_CORTOS
          {
             type  = OP_SELL;
             price = NormalizeDouble(Bid, Digitos);
             tp    = 0.0;
+            clr   = clrGreen;
          }
    
          // Enviar orden
-         int ticket = OrderSend(Par, type, lots, price, slippage, sl_price, tp, comment, magic, 0, clrNONE);
+         int ticket = OrderSend(Par, type, lots, price, slippage, sl_price, tp, comment, magic, 0, clr);
          if(ticket < 0)
          {
             // Si falla, intentamos seguir con el resto (por si es un fallo puntual)
@@ -841,4 +822,92 @@ void EnsureTodaySeparator()
 string NowHMSStr()
 {
    return TimeToString(TimeCurrent(), TIME_SECONDS); // "YYYY.MM.DD HH:MM:SS"
+}
+
+
+
+//------------------------BORRAR A FUTURO-------------------------
+// Devuelve la dirección según Williams %R (periodo 8) en el TF indicado.
+// - Si WPR >= -20  y dir==DIR_LARGOS -> true
+// - Si WPR <= -80  y dir==DIR_CORTOS -> true
+// - En otro caso -> false
+bool DirWPR(ENUM_TIMEFRAMES tf, int dir)
+{
+   int tfconvertido = ConversorTF(tf);
+   int period = 8; // estándar de Williams %R
+   double wpr = iWPR(Par, tfconvertido, period, 0); // barra actual
+
+   if(wpr == EMPTY_VALUE) 
+      return false;
+
+   if((dir == DIR_LARGOS) && (wpr >= -20.0))
+      return true;
+
+   if((dir == DIR_CORTOS) && (wpr <= -80.0))
+      return true;
+
+   return false;
+}
+
+// Devuelve la dirección según CCI (periodo 8) en el TF indicado.
+// - Si CCI >=  +100 y dir==DIR_LARGOS -> true
+// - Si CCI <=  -100 y dir==DIR_CORTOS -> true
+// - En otro caso -> false
+bool DirCCI(ENUM_TIMEFRAMES tf, int dir)
+{
+   int tfconvertido = ConversorTF(tf);
+   int period = 8; // estándar CCI
+   double cci = iCCI(Par, tfconvertido, period, PRICE_TYPICAL, 0); // barra actual
+
+   if(cci == EMPTY_VALUE)
+      return false;
+
+   if((dir == DIR_LARGOS) && (cci >= 100.0))
+      return true;
+
+   if((dir == DIR_CORTOS) && (cci <= -100.0))
+      return true;
+
+   return false;
+}
+
+// Punto genérico en el tiempo y precio indicados (usa un "bullet" Wingdings 159)
+void PlotPointAt(double price, color c)
+{
+   double   p   = NormalizeDouble(price, Digitos);
+   datetime tt  = TimeCurrent();
+
+   // nombre robusto: Symbol + epoch + contador si ya existe
+   static int seq = 0;
+   string base = StringFormat("%s_%s_%d", "PT", Par, (int)tt);
+   string name = base;
+
+   // evita colisión si pintas varios en el mismo segundo
+   while(ObjectFind(0, name) >= 0)
+   { 
+      seq++; 
+      name = StringFormat("%s_%d", base, seq); 
+   }
+
+   ObjectCreate(0, name, OBJ_ARROW, 0, tt, p);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, c);
+   ObjectSetInteger(0, name, OBJPROP_WIDTH, 4);
+   ObjectSetInteger(0, name, OBJPROP_ARROWCODE, 159);     // bullet
+   ObjectSetInteger(0, name, OBJPROP_BACK, false);        // delante
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);  // no seleccionable
+   
+}
+
+void DeleteAllPoints()
+{
+   for(int i = ObjectsTotal()-1; i >= 0; i--)
+   {
+      string name = ObjectName(i);
+      if(ObjectType(name) == OBJ_ARROW)
+      {
+         int code = (int)ObjectGetInteger(0, name, OBJPROP_ARROWCODE);
+         if(code == 159)   // nuestro "bullet" Wingdings
+            ObjectDelete(0, name);
+      }
+   }
 }
