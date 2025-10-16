@@ -12,10 +12,11 @@ input ENUM_TIMEFRAMES PeriodoMICRO = PERIOD_M1;
 input ENUM_TIMEFRAMES PeriodoMESO = PERIOD_M5;
 input ENUM_TIMEFRAMES PeriodoFractal = PERIOD_M30;
 
-input bool PintarHistorico = true;
-input int  NumeroFractalesPintarHistorico = 20;
-input bool PintarLineaVertical = true;
+input bool  PintarHistorico = true;
+input int   NumeroFractalesPintarHistorico = 20;
+input bool  PintarLineaVertical = true;
 input bool  Real = false;
+input bool  Backtesting = false;
 input bool  PintarSeparadoresDia   = true;
 input int   DiasSeparadoresHist    = 3;           // cuántos días hacia atrás
 input color ColorSeparadorDia      = clrDimGray;
@@ -60,7 +61,7 @@ bool ActivadoPatronImpulsoOnda3M32 = false;
 int OnInit()
   {
 //---
-   if ((PintarHistorico) && (PintarLineaVertical) && (!PintarUnaVez))
+   if ((!Backtesting) && (PintarHistorico) && (PintarLineaVertical) && (!PintarUnaVez))
    {
       // Borra todas las OBJ_VLINE del gráfico (todas las subventanas)
       DeleteAllVLines();
@@ -471,7 +472,7 @@ bool FindZigZagInWindow(double priceTarget,
    t_Micro = 0;
    
    // empezamos en la barra M1 más cercana a tEnd-1 (para incluir todo el tramo)
-   int shift = iBarShift(Par, tfm, tEnd - 1, true);
+   int shift = iBarShift(Par, tfm, tEnd, true);
    if(shift < 0) return false;
 
    for(int s = shift; s < iBars(Par, tfm); s++)
@@ -481,10 +482,21 @@ bool FindZigZagInWindow(double priceTarget,
       if(tt >= tEnd) continue;            // estamos por delante; retrocede
 
       double zz = iCustom(Par, tfm, "ZigZag", depth, dev, back, 0, s);
+      // Verificamos igualdad por precio entre
+      //Zigzag PeriodoMiCRO con el valor del Fractal del PeriodoFractal
       if ((zz != 0.0) && (zz == priceTarget))
       {
          t_Micro = tt;
-         return true;
+
+         // Verificamos igualdad por precio entre
+         //fractal del PeriodoMiCRO con el valor del Fractal del PeriodoMICRO.
+         double fUp = iFractals(Par, tfm, MODE_UPPER, s);
+         double fDn = iFractals(Par, tfm, MODE_LOWER, s);
+         
+         if ((fUp == priceTarget) || (fDn == priceTarget))
+         {
+            return true;
+         }         
       }
    }
    
