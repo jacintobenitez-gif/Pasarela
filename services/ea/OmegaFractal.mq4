@@ -15,14 +15,13 @@ input ENUM_TIMEFRAMES PeriodoFractal = PERIOD_M30;
 input bool  PintarHistorico = true;
 input int   NumeroFractalesPintarHistorico = 40;
 input bool  PintarLineaVertical = true;
-input bool  Ejecutar_Operaciones = false; 
+input bool  Ejecutar_Operaciones = true; 
 input bool  Backtesting = true; 
 input bool  PintarSeparadoresDia   = true;
 input int   DiasSeparadoresHist    = 4;           // cuántos días hacia atrás
 input color ColorSeparadorDia      = clrDimGray;
 input int   EstiloSeparadorDia     = STYLE_DOT;
 input int   AnchoSeparadorDia      = 3;
-
 
 //Variables Globales
 int MV32_Depth = 32;
@@ -45,6 +44,7 @@ double StopLoss = 0;
 //ZigZag
 double   ZZAux[];
 datetime ZZAuxTime[];
+datetime ZZAuxtMicro[1];
 
 //Direcciones
 int DIR_NODIR  = 0;
@@ -131,6 +131,7 @@ void OnTick()
          {
             ActivadoPatronImpulsoOnda3M32 = true; 
             Traza1 = Traza1 + "\n" + NowHMSStr() + " PatronImpulsoOnda3M32: True ";            
+            Traza1 = Traza1 + "\n" + NowHMSStr() + " Status Ejecutar_Operaciones: " + IntegerToString(Ejecutar_Operaciones);            
 
             if (Ejecutar_Operaciones)
             {
@@ -276,6 +277,7 @@ bool PatronImpulsoOnda3M32(double dFractal, int dir, double &sl)
                {
                   Traza1 = Traza1 + "\nPatronImpulsoOnda3M32: Fractales MICRO y MESO SI alineados";
                   ConfirmacionFractalesMICROyMESOalineados = true;
+                  ZZAuxtMicro[0] = t_Micro;                  
                } 
                else
                {
@@ -290,7 +292,9 @@ bool PatronImpulsoOnda3M32(double dFractal, int dir, double &sl)
                //Trigger Operacion Largos
                bPatronOnda3M32 = true;
                sl = ZZR0;
-               DrawOmega(t_Micro, ZZR0, 50, clrGold, 32);               
+               Traza1 = Traza1 + "\nDrawOmega - Parametros entrada:";        
+               Traza1 = Traza1 + "\n t_Micro: " + StringFormat("%s", TimeToString(t_Micro, TIME_DATE|TIME_SECONDS)) + " ZZR0: " + DoubleToStr(ZZR0);
+               DrawOmega(ZZAuxtMicro[0], ZZR0, 10, clrGold, 20);               
             } 
             else
             {
@@ -333,6 +337,7 @@ bool PatronImpulsoOnda3M32(double dFractal, int dir, double &sl)
                {
                   Traza1 = Traza1 + "\nPatronImpulsoOnda3M32: Fractales MICRO y MESO SI alineados";
                   ConfirmacionFractalesMICROyMESOalineados = true;
+                  ZZAuxtMicro[0] = t_Micro;                                    
                } 
                else
                {
@@ -347,7 +352,9 @@ bool PatronImpulsoOnda3M32(double dFractal, int dir, double &sl)
                //Trigger Operacion Largos
                bPatronOnda3M32 = true;
                sl = ZZR0;
-               DrawOmega(t_Micro, ZZR0, 50, clrGold, 32);
+               Traza1 = Traza1 + "\nDrawOmega - Parametros entrada:";        
+               Traza1 = Traza1 + "\n t_Micro: " + StringFormat("%s", TimeToString(t_Micro, TIME_DATE|TIME_SECONDS)) + " ZZR0: " + DoubleToStr(ZZR0);
+               DrawOmega(ZZAuxtMicro[0], ZZR0, 10, clrGold, 20);
             } 
             else
             {
