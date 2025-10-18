@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//|                                                OmegaFractal4.mq4 |
+//|                                                OmegaFractal6.mq4 |
 //|                                  Copyright 2025, MetaQuotes Ltd. |
 //|                                             https://www.mql5.com |
 //+------------------------------------------------------------------+
@@ -7,21 +7,28 @@
 #property link      "https://www.mql5.com"
 #property version   "1.00"
 #property strict
-
+//+------------------------------------------------------------------+
+//| Expert initialization function                                   |
+//+------------------------------------------------------------------+
 input ENUM_TIMEFRAMES PeriodoMICRO = PERIOD_M1;
 input ENUM_TIMEFRAMES PeriodoMESO = PERIOD_M5;
 input ENUM_TIMEFRAMES PeriodoFractal = PERIOD_M30;
-
-input bool  PintarHistorico = true;
-input int   NumeroFractalesPintarHistorico = 40;
-input bool  PintarLineaVertical = true;
-input bool  Ejecutar_Operaciones = true; 
-input bool  Backtesting = true; 
+input bool  PintarHistorico        = true;
+input int   NumeroFractalesaPintar = 20;
+input bool  PintarLineaVertical    = true;
+input bool  GoLive                 = True; 
 input bool  PintarSeparadoresDia   = true;
-input int   DiasSeparadoresHist    = 4;           // cuántos días hacia atrás
+input int   DiasSeparadoresHist    = 3;           // cuántos días hacia atrás
 input color ColorSeparadorDia      = clrDimGray;
 input int   EstiloSeparadorDia     = STYLE_DOT;
 input int   AnchoSeparadorDia      = 3;
+input bool  Backtesting            = true;
+
+
+//Direcciones
+int DIR_NODIR  = 0;
+int DIR_LARGOS = 1;
+int DIR_CORTOS = -1;
 
 //Variables Globales
 int MV32_Depth = 32;
@@ -30,48 +37,35 @@ int Deviation = 5;
 int Backstep = 3;
 string Par = Symbol();
 int Digitos = (int)MarketInfo(Par, MODE_DIGITS);
-bool PintarUnaVez = false;
+int fDireccion = DIR_NODIR;
+datetime fTime = 0; 
+bool fValido = false;
 double FractalLeido = 0;
 double FractalActual = 0;
-bool FractalValido = false;
 bool LecturaMercado = true;
 bool EntradaMercado = false;
 bool SalidaMercado = false;
-bool Trazas = false;
-datetime t_PeriodoFractal;
-double StopLoss = 0;
+double SLPatronImpulsoOnda3M32 = 0;
+bool PintarUnaVez = false;
+bool ActivadoPatronImpulsoOnda3M32 = false;
+
 
 //ZigZag
 double   ZZAux[];
 datetime ZZAuxTime[];
-datetime ZZAuxtMicro[1];
 
-//Direcciones
-int DIR_NODIR  = 0;
-int DIR_LARGOS = 1;
-int DIR_CORTOS = -1;
-int Direccion = DIR_NODIR;
 
 //Trazas
 string Traza1 = "";
 string Traza2 = "";
 
-//Patrones
-bool ActivadoPatronImpulsoOnda3M32 = false;
-bool ConfirmacionFractalesMICROyMESOalineados = false;
-
-//+------------------------------------------------------------------+
-//| Expert initialization function                                   |
-//+------------------------------------------------------------------+
 int OnInit()
-  {
+{
 //---
-
-   if ((PintarHistorico) && (PintarLineaVertical) && (!PintarUnaVez))
+   if ((PintarHistorico) && (!PintarUnaVez))
    {
-      // Borra todas las OBJ_VLINE del gráfico (todas las subventanas)
       DeleteAllVLines();
-      GetLastFractalsHistory(NumeroFractalesPintarHistorico);
+      GetAlignedFractalMacroZZMicro(PeriodoFractal, fDireccion, fTime, FractalLeido, 1, NumeroFractalesaPintar);   
       PintarUnaVez = true;
    }
    
@@ -80,7 +74,7 @@ int OnInit()
    
 //---
    return(INIT_SUCCEEDED);
-  }
+}
 //+------------------------------------------------------------------+
 //| Expert tick function                                             |
 //+------------------------------------------------------------------+
@@ -90,82 +84,74 @@ void OnTick()
 
    if(PintarSeparadoresDia)
       EnsureTodaySeparator();
+   
+   Traza1 = "\n" + NowHMSStr() + " GetAlignedFractalMacroZZMicro-->"; 
+   fDireccion = DIR_NODIR;
+   fTime = 0; 
+   fValido = false;
 
-   FractalLeido = GetLastFractalNow(PeriodoFractal, Direccion, t_PeriodoFractal);
-
-   Traza1 = "\n" + NowHMSStr() + " Fractal Leido: " + DoubleToStr(FractalLeido, Digitos);
+   fValido = GetAlignedFractalMacroZZMicro(PeriodoFractal, fDireccion, fTime, FractalLeido, 1, 1);
+   Comment(Traza1, "\n-----------", Traza2);
    
    if (LecturaMercado)
-   {      
-      if (FractalLeido != FractalActual)
+   {    
+      if (fValido)
       {
-         //Encontramos nuevo fractal y pintamos linea correspondiente para ayuda visual
-         //en la lectura.
-         
-         FractalActual = FractalLeido;
-         Traza1 = Traza1 + "\n" + NowHMSStr() + " Fractal Actual: " + DoubleToStr(FractalActual, Digitos);
-
-         FractalValido = false;
-         Traza1 = Traza1 + "\n" + NowHMSStr() + " PintarLineaVertical: " + DoubleToStr(PintarLineaVertical, Digitos);
-         
-         if (PintarLineaVertical)
-         { 
-            if (GetFractalinMICRO(FractalActual, FractalValido, t_PeriodoFractal))
-            {
-               Traza1 = Traza1 + "\n" + NowHMSStr() + " FractalinMicro: True"; 
-               Traza1 = Traza1 + "\n" + NowHMSStr() + " Fractal Valido: " + DoubleToStr(FractalValido, Digitos);     
-            }
-            else
-            {
-               Traza1 = Traza1 + "\n" + NowHMSStr() + " FractalinMICRO: False";                  
-            }
-         } 
-      }
-      else if ((FractalLeido == FractalActual) && (FractalValido))
-      {
-         //Con el nuevo fractal, valido, procedo a buscar nuevas oportunidades de negocio.  
-         Traza1 = "\n" + NowHMSStr() + " Fractal Leido - Actual: " + DoubleToStr(FractalActual, Digitos);
-         
-         //Busqueda de oportunidad de negocio: PatronImpulsoOnda3M32
-         if (PatronImpulsoOnda3M32(FractalActual, Direccion, StopLoss))
+         if (FractalLeido != FractalActual) 
          {
-            ActivadoPatronImpulsoOnda3M32 = true; 
-            Traza1 = Traza1 + "\n" + NowHMSStr() + " PatronImpulsoOnda3M32: True ";            
-            Traza1 = Traza1 + "\n" + NowHMSStr() + " Status Ejecutar_Operaciones: " + IntegerToString(Ejecutar_Operaciones);            
-
-            if (Ejecutar_Operaciones)
+            FractalActual = FractalLeido;  
+            
+            if (PatronImpulsoOnda3M32(FractalActual, fDireccion, SLPatronImpulsoOnda3M32))
             {
-               LecturaMercado = false;
-               EntradaMercado = true;
-               SalidaMercado = false;
-            }           
-         }      
+               if (GoLive)
+               {
+                  LecturaMercado = false;
+                  EntradaMercado = true;
+                  SalidaMercado = false;
+               }
+               
+               ActivadoPatronImpulsoOnda3M32 = true;                
+            }
+            Comment(Traza1, "\n-----------", Traza2);                
+         }  
+         else if (FractalLeido == FractalActual) 
+         {
+            if (PatronImpulsoOnda3M32(FractalActual, fDireccion, SLPatronImpulsoOnda3M32))
+            {
+               if (GoLive)
+               {
+                  LecturaMercado = false;
+                  EntradaMercado = true;
+                  SalidaMercado = false;
+               }                 
+
+               ActivadoPatronImpulsoOnda3M32 = true;                
+            }
+            Comment(Traza1, "\n-----------", Traza2);
+         }
       }
-      
-      Comment(Traza1);
+      else
+      {
+         Traza1 = "\n" + NowHMSStr() + "\nFractal Invalido-->" + DoubleToStr(FractalLeido) + " Time: " + TimeToString(fTime, TIME_DATE | TIME_SECONDS); 
+      }
    }
    else if (EntradaMercado)
-   {      
+   {
       Traza1 = Traza1 + "\n" + NowHMSStr() + " EntradaMercado: True ";                        
 
       if (ActivadoPatronImpulsoOnda3M32) 
       { 
-         //Reset
-         ConfirmacionFractalesMICROyMESOalineados = false;     
          Traza1 = Traza1 + "\n" + NowHMSStr() + " Patron encontrado: PatronImpulsoOnda3M32 "; 
          
          double Lote = 0;
          
          if (Backtesting)
-         {
             Lote = MarketInfo(Par, MODE_MINLOT);      
-         }
          else
-         {
             Lote = 0.1;
-         }                       
+                    
          
-         int OperacionesEjecutadas = ExecMarket(Direccion, 1, StopLoss, Lote, Par + "-P1");
+         int OperacionesEjecutadas = ExecMarket(fDireccion, 1, SLPatronImpulsoOnda3M32, Lote, Par + "-P1");
          
          //Ejecutas orden en el mercado
          if  (OperacionesEjecutadas > 0)
@@ -184,7 +170,7 @@ void OnTick()
    {
       //Verificar que todas las operaciones se cerraron
       //damos paso a la lectura del mercado
-      Traza1 =  Traza1 + "\n" + NowHMSStr() + " SalidaMercado True: ";                        
+      Traza1 =  Traza1 + "\n" + NowHMSStr() + " SalidaMercado True ";                        
       
       if (ActivadoPatronImpulsoOnda3M32)
       {
@@ -204,7 +190,7 @@ void OnTick()
          }
          
          //Salida PatronImpulsoOnda3M32: Cerrar ordenes mercado controlado por mi.
-         if (SalidaPatronImpulsoOnda3M32(FractalActual, Direccion))  
+         if (SalidaPatronImpulsoOnda3M32(FractalActual, fDireccion))  
          {
             // Cierre por TP lógico (condición de salida)
             int cerradas = CierreOrdenes(commentSalida);
@@ -219,17 +205,14 @@ void OnTick()
                EntradaMercado = false;
                SalidaMercado = false;               
             }
-         } 
+         }    
       }
-
+      
       Comment(Traza1);
-   }
+   }   
 }
-
 //+------------------------------------------------------------------+
-//+------------------------------------------------------------------+
-//                      PATRONES BASICOS
-
+//--------------------------FUNCIONES DE NEGOCIO------------------------
 bool PatronImpulsoOnda3M32(double dFractal, int dir, double &sl)
 {
    //Patron basado en buscar en PeriodoMICRO, Ondas 2 u Ondas 3 consecutivas, en impulso, a 
@@ -238,17 +221,16 @@ bool PatronImpulsoOnda3M32(double dFractal, int dir, double &sl)
    sl = 0;
    
    //Leyendo las ultima posición del periodo MICRO
-   ZigZag(Par, PeriodoMICRO, MV32_Depth, 4);
+   ZigZag(Par, PeriodoMICRO, MV32_Depth, 3);
    // justo después de ZigZag(Par, PeriodoMICRO, MV32, 4);
    if(ZZAux[0] == 0.0 || ZZAux[1] == 0.0 || ZZAux[2] == 0.0) return false;
    
-   Traza1 = Traza1 + "\nPatronImpulsoOnda3M32";
-   
+   Traza2 = Traza2 + "\nPatronImpulsoOnda3M32: " + DoubleToStr(dFractal) + " - Dir: " + IntegerToString(dir);
+   Traza2 = Traza2 + "\nR0: " + DoubleToStr(ZZAux[0], Digitos) + " R1: " + DoubleToStr(ZZAux[1], Digitos) + " R2: " + DoubleToStr(ZZAux[2], Digitos);
+
    if (dir == DIR_LARGOS)
    {
-      Traza1 = Traza1 + "\nPatronImpulsoOnda3M32: LARGOS";
-
-      if ((ZZAux[2] == dFractal) && (ZZAux[0] < ZZAux[1]) 
+      if ((ZZAux[2] == dFractal) && (ZZAux[0] < ZZAux[1]) && (ZZAux[0] > ZZAux[2]) 
       && (ZZAux[1] > ZZAux[2]))
       {
          double ZZR2 = ZZAux[2];
@@ -262,43 +244,18 @@ bool PatronImpulsoOnda3M32(double dFractal, int dir, double &sl)
          
          if ((ZZR0 == ZZAux[0]) && (ZZR1 == ZZAux[1]) && (ZZR2 == ZZAux[2]))
          {
-            Traza1 = Traza1 + "\nPatronImpulsoOnda3M32: Detectada ONDA2";
+            Traza2 = Traza2 + "\nPatronImpulsoOnda3M32: Detectada ONDA2 Largos";
 
-            //ONDA 2
-            datetime t_Meso = 0;
-            datetime t_Micro = 0;
-            int DireccionMeso = 0;
-            
-            double FractalMeso = GetLastFractalNow(PeriodoMESO, DireccionMeso, t_Meso);
- 
-            if (!ConfirmacionFractalesMICROyMESOalineados)
+            if ((DirEMA1vsEMA5(PeriodoMICRO, dir)) && (DirEMA1vsEMA5(PeriodoMESO, dir)))
             {
-               if (FindZigZagInWindow(PeriodoMESO, FractalMeso, t_Meso, PeriodoMICRO, t_Micro))
-               {
-                  Traza1 = Traza1 + "\nPatronImpulsoOnda3M32: Fractales MICRO y MESO SI alineados";
-                  ConfirmacionFractalesMICROyMESOalineados = true;
-                  ZZAuxtMicro[0] = t_Micro;                  
-               } 
-               else
-               {
-                  Traza1 = Traza1 + "\nPatronImpulsoOnda3M32: Fractales MICRO y MESO NO alineados";               
-               } 
-            }
-                  
-            if ((ConfirmacionFractalesMICROyMESOalineados) 
-            && ((DirEMA1vsEMA5(PeriodoMICRO, dir)) && (DirEMA1vsEMA5(PeriodoMESO, dir))))
-            {
-               Traza1 = Traza1 + "\nPatronImpulsoOnda3M32: Patrón confirmado";        
+               Traza2 = Traza2 + "\nPatronImpulsoOnda3M32: Patrón confirmado";        
                //Trigger Operacion Largos
                bPatronOnda3M32 = true;
                sl = ZZR0;
-               Traza1 = Traza1 + "\nDrawOmega - Parametros entrada:";        
-               Traza1 = Traza1 + "\n t_Micro: " + StringFormat("%s", TimeToString(t_Micro, TIME_DATE|TIME_SECONDS)) + " ZZR0: " + DoubleToStr(ZZR0);
-               DrawOmega(ZZAuxtMicro[0], ZZR0, 10, clrGold, 20);               
             } 
             else
             {
-               Traza1 = Traza1 + "\nPatronImpulsoOnda3M32: Direccion MICRO y MESO: No alineadas";        
+               Traza2 = Traza2 + "\nPatronImpulsoOnda3M32: Direccion MICRO y MESO: No alineadas";        
                return false;
             }                    
          }         
@@ -306,9 +263,7 @@ bool PatronImpulsoOnda3M32(double dFractal, int dir, double &sl)
    }
    else if (dir == DIR_CORTOS)
    {
-      Traza1 = Traza1 + "\nPatronImpulsoOnda3M32: CORTOS";
-
-      if ((ZZAux[2] == dFractal) && (ZZAux[0] > ZZAux[1]) 
+      if ((ZZAux[2] == dFractal) && (ZZAux[0] > ZZAux[1]) && (ZZAux[0] < ZZAux[2]) 
       && (ZZAux[1] < ZZAux[2]))
       {
          double ZZR2 = ZZAux[2];
@@ -322,43 +277,18 @@ bool PatronImpulsoOnda3M32(double dFractal, int dir, double &sl)
          
          if ((ZZR0 == ZZAux[0]) && (ZZR1 == ZZAux[1]) && (ZZR2 == ZZAux[2]))
          {
-            Traza1 = Traza1 + "\nPatronImpulsoOnda3M32: Detectada ONDA2";
+            Traza2 = Traza2 + "\nPatronImpulsoOnda3M32: Detectada ONDA2 Cortos";
 
-            //ONDA 2
-            datetime t_Meso = 0;
-            datetime t_Micro = 0;
-            int DireccionMeso = 0;
-            
-            double FractalMeso = GetLastFractalNow(PeriodoMESO, DireccionMeso, t_Meso);
-
-            if (!ConfirmacionFractalesMICROyMESOalineados)
+            if ((DirEMA1vsEMA5(PeriodoMICRO, dir)) && (DirEMA1vsEMA5(PeriodoMESO, dir)))
             {
-               if (FindZigZagInWindow(PeriodoMESO, FractalMeso, t_Meso, PeriodoMICRO, t_Micro))
-               {
-                  Traza1 = Traza1 + "\nPatronImpulsoOnda3M32: Fractales MICRO y MESO SI alineados";
-                  ConfirmacionFractalesMICROyMESOalineados = true;
-                  ZZAuxtMicro[0] = t_Micro;                                    
-               } 
-               else
-               {
-                  Traza1 = Traza1 + "\nPatronImpulsoOnda3M32: Fractales MICRO y MESO NO alineados";               
-               } 
-            }
-                        
-            if ((ConfirmacionFractalesMICROyMESOalineados) 
-            && ((DirEMA1vsEMA5(PeriodoMICRO, dir)) && (DirEMA1vsEMA5(PeriodoMESO, dir))))
-            {
-               Traza1 = Traza1 + "\nPatronImpulsoOnda3M32: Patrón confirmado";        
+               Traza2 = Traza2 + "\nPatronImpulsoOnda3M32: Patrón confirmado";        
                //Trigger Operacion Largos
                bPatronOnda3M32 = true;
                sl = ZZR0;
-               Traza1 = Traza1 + "\nDrawOmega - Parametros entrada:";        
-               Traza1 = Traza1 + "\n t_Micro: " + StringFormat("%s", TimeToString(t_Micro, TIME_DATE|TIME_SECONDS)) + " ZZR0: " + DoubleToStr(ZZR0);
-               DrawOmega(ZZAuxtMicro[0], ZZR0, 10, clrGold, 20);
             } 
             else
             {
-               Traza1 = Traza1 + "\nPatronImpulsoOnda3M32: Direccion MICRO y MESO: No alineadas";        
+               Traza2 = Traza2 + "\nPatronImpulsoOnda3M32: Direccion MICRO y MESO: No alineadas";        
                return false;
             }                    
          }         
@@ -368,198 +298,99 @@ bool PatronImpulsoOnda3M32(double dFractal, int dir, double &sl)
    return(bPatronOnda3M32);
 }
 
-bool SalidaPatronImpulsoOnda3M32(double dFractal, int dir)
+//--------------------------FUNCIONES BASICAS-------------------
+
+// ===================== GetAlignedFractalMacroZZMicro (Lectura de Fractales en PeriodoFractal y ZZ en PeriodoMicro) ======================
+bool GetAlignedFractalMacroZZMicro(ENUM_TIMEFRAMES PeriodoFractalaLeer, 
+int &f_Direccion, datetime &f_Time, double &f_Price, int lookinit = 1, int lookback=1)
 {
-   bool bSalidaPatronImpulsoOnda3M32 = false;
-
-   //Leyendo las ultima posición del periodo MICRO
-   ZigZag(Par, PeriodoMICRO, MV32_Depth, 4);
-// después de ZigZag(Par, PeriodoMICRO, MV32, 4);
-   if(ZZAux[0] == 0.0 || ZZAux[1] == 0.0 || ZZAux[2] == 0.0 || ZZAux[3] == 0.0) return false;
-   
-   if (dir == DIR_LARGOS)
-   {
-      if ((ZZAux[3] == dFractal) && (ZZAux[0] > ZZAux[1])
-      && (ZZAux[1] < ZZAux[2]) && (ZZAux[2] > ZZAux[3]))
-      {
-         //ONDA 3
-         bSalidaPatronImpulsoOnda3M32 = true;
-      }
-   }
-   else if (dir == DIR_CORTOS)
-   {
-      if ((ZZAux[3] == dFractal) && (ZZAux[0] < ZZAux[1])
-      && (ZZAux[1] > ZZAux[2]) && (ZZAux[2] < ZZAux[3]))
-      {
-         //ONDA 3
-         bSalidaPatronImpulsoOnda3M32 = true;
-      }      
-   }
-      
-   return(bSalidaPatronImpulsoOnda3M32);
-}
-
-// Devuelve la dirección de EMA(1) vs  EMA(5) en el TF.
-bool DirEMA1vsEMA5(ENUM_TIMEFRAMES tf, int dir)
-{
-   bool salida = false;
-
-   int tfconvertido = ConversorTF(tf);
-   
-   double ema1   = iMA(Par, tfconvertido, 1, 0, MODE_EMA,   PRICE_CLOSE, 0);
-   double ema5   = iMA(Par, tfconvertido, 5, 0, MODE_EMA,   PRICE_CLOSE, 0);
-
-   if ((dir == DIR_LARGOS) && (ema1 > ema5))
-      salida = true;
-   else if ((dir == DIR_CORTOS) && (ema1 < ema5))
-      salida = true;
-   else
-      salida = false;   
-   
-   return salida;
-
-}
-
-//+------------------------------------------------------------------+
-double GetLastFractalNow(ENUM_TIMEFRAMES Periodoaleer, int &DireccionActual, datetime &t_TimeFractal)
-{
-   int dir = DIR_NODIR;
+   bool bGetAlignedFractalMacroZZMicro = false;
    int contador = 0;
-   int lookback = 1;
-   double Fractal = 0;
 
    // Recorremos barras desde la más reciente (shift=0) hacia atrás
-   int tfconvertido = ConversorTF(Periodoaleer);
-   int total = iBars(Par, tfconvertido);         
-   for (int i = 0; i < total; i++)
+   int tfconvertido = ConversorTF(PeriodoFractalaLeer);
+   int total = iBars(Par, tfconvertido);  
+   int i = lookinit;
+   
+   for (; i < total; i++)    
    {
       double up  = iFractals(Par, tfconvertido, MODE_UPPER, i);
       double dn  = iFractals(Par, tfconvertido, MODE_LOWER, i);
       
       if (up > 0)
       {
-         Fractal = up;
-         t_TimeFractal = iTime(Par, tfconvertido, i);           
-         DireccionActual = DIR_CORTOS;
-         contador++;          
-      }
-      else if (dn > 0)
-      {
-         Fractal = dn;
-         t_TimeFractal = iTime(Par, tfconvertido, i);           
-         DireccionActual = DIR_LARGOS; 
-         contador++;
-      }      
-      
-      if (contador >= lookback)
-         break;
-      
-   }
+         f_Price = up;
+         f_Time = iTime(Par, tfconvertido, i);           
+         f_Direccion = DIR_CORTOS;
+         Traza2 = "\n" + NowHMSStr() + " PeriodoFractalaLeer: " + IntegerToString(tfconvertido) +  " Direccion: " + IntegerToString(f_Direccion);
+         Traza2 = Traza2 + " Time: " +TimeToString(f_Time, TIME_DATE | TIME_SECONDS) + " Precio: " + DoubleToStr(f_Price);    
 
-   return (Fractal);
-   
-}
-
-
-//+------------------------------------------------------------------+
-void GetLastFractalsHistory(int lookback = 1)
-{
-   int contador = 0;
-   double Fractal = 0;
-
-   // Recorremos barras desde la más reciente (shift=0) hacia atrás
-   int tfconvertido = ConversorTF(PeriodoFractal);
-   int total = iBars(Par, tfconvertido);         
-   for (int i = 0; i < total; i++)
-   {
-      double up  = iFractals(Par, tfconvertido, MODE_UPPER, i);
-      double dn  = iFractals(Par, tfconvertido, MODE_LOWER, i);
-      
-      if (up > 0)
-      {
-         Fractal = up;
-         bool dummy=false;
-         datetime t_Fractal = iTime(Par, tfconvertido, i); 
-          
-         if (PintarLineaVertical) 
-            GetFractalinMICRO(Fractal, dummy, t_Fractal);  
-         contador++;          
-      }
-      else if (dn > 0)
-      {
-         Fractal = dn;
-         bool dummy=false;
-         datetime t_Fractal = iTime(Par, tfconvertido, i);  
+         datetime f_TimeMICRO = 0;
          
-         if (PintarLineaVertical) 
-            GetFractalinMICRO(Fractal, dummy, t_Fractal);
+         if (FindZigZagInMICRO(PeriodoFractal, f_Price, f_Time, PeriodoMICRO, f_TimeMICRO))
+         {
+            if (PintarLineaVertical)
+            {
+               DrawVLine(f_TimeMICRO, clrRed); 
+            }          
+
+            bGetAlignedFractalMacroZZMicro = True; 
+         }
+         else
+         {
+            if (PintarLineaVertical)
+            {
+               DrawVLine(f_Time, clrOrange); 
+            }          
+
+            bGetAlignedFractalMacroZZMicro = false;            
+         }                          
+
+         contador++;          
+      }
+      else if (dn > 0)
+      {
+         f_Price = dn;
+         f_Time = iTime(Par, tfconvertido, i);           
+         f_Direccion = DIR_LARGOS; 
+         Traza2 = "\n" + NowHMSStr() + " PeriodoFractalaLeer: " + IntegerToString(tfconvertido) +  " Direccion: " + IntegerToString(f_Direccion);
+         Traza2 = Traza2 + " Time: " +TimeToString(f_Time, TIME_DATE | TIME_SECONDS) + " Precio: " + DoubleToStr(f_Price);         
+
+         datetime f_TimeMICRO = 0;
+         
+         if (FindZigZagInMICRO(PeriodoFractal, f_Price, f_Time, PeriodoMICRO, f_TimeMICRO))
+         {
+            if (PintarLineaVertical)
+            {
+               DrawVLine(f_TimeMICRO, clrGreen); 
+            }          
+
+            bGetAlignedFractalMacroZZMicro = True;            
+         } 
+         else
+         {
+            if (PintarLineaVertical)
+            {
+               DrawVLine(f_Time, clrOrange); 
+            }          
+
+            bGetAlignedFractalMacroZZMicro = false;            
+         }        
+
          contador++;
       }      
       
       if (contador >= lookback)
+      { 
          break;
-      
+      }     
    }   
+   
+   return(bGetAlignedFractalMacroZZMicro);
 }
 
-bool GetFractalinMICRO(double Price, bool &FValido, datetime tPeriodoFractal)
-{
-   // Recorremos barras desde la más reciente (shift=0) hacia atrás
-   int tfconvertido = ConversorTF(PeriodoMICRO);   
-   int total = iBars(Par, tfconvertido);     
-   FValido = false;
-   bool bEncontrado = false;
- 
-   for (int i = 0; i < total; i++)
-   {
-      double up  = iFractals(Par, tfconvertido, MODE_UPPER, i);
-      double dn  = iFractals(Par, tfconvertido, MODE_LOWER, i);
-        
-      if (NormalizeDouble(up, Digitos) == NormalizeDouble(Price, Digitos))
-      {  
-         datetime t_m1 = 0;
-               
-         if (FindZigZagInWindow(PeriodoFractal, Price, tPeriodoFractal, PeriodoMICRO, t_m1)) 
-         {
-            DrawVLine(t_m1, clrRed);
-            FValido = true;
-            bEncontrado = true;
-         }
-         else
-         {
-            DrawVLine(t_m1, clrOrange);
-            FValido = false;
-            bEncontrado = true;
-         }
-         
-         break;      
-      }
-      else if (NormalizeDouble(dn, Digitos) == NormalizeDouble(Price, Digitos))
-      {
-         datetime t_m1 = 0;
-
-         if (FindZigZagInWindow(PeriodoFractal, Price, tPeriodoFractal, PeriodoMICRO, t_m1)) 
-         {
-            DrawVLine(t_m1, clrGreen);
-            FValido = true; 
-            bEncontrado = true;                       
-         }           
-         else
-         {
-            DrawVLine(t_m1, clrOrange);
-            FValido = false;
-            bEncontrado = true;            
-         }
-            
-         break;
-      }
-   }
-   
-   return(bEncontrado);
-   
-}
-
-bool FindZigZagInWindow(ENUM_TIMEFRAMES tfBase,
+// ===================== FindZigZagInMICRO (A partir de un fractal macro, encuentra el ZZ en periodo MICRO) ======================
+bool FindZigZagInMICRO(ENUM_TIMEFRAMES tfBase,
                         double priceTarget,
                         datetime tFractalTF,   // tiempo de la barra del Periodo 
                         ENUM_TIMEFRAMES tfMicro,
@@ -604,6 +435,7 @@ bool FindZigZagInWindow(ENUM_TIMEFRAMES tfBase,
    
    return false;
 }
+
 // ===================== ZigZag (núcleo con arrays ZZAux/ZZAuxTime) ======================
 void ZigZag(string sMarket, ENUM_TIMEFRAMES iPeriodo, int ZZPeriodo, int iIteraciones)
 {
@@ -634,44 +466,25 @@ void ZigZag(string sMarket, ENUM_TIMEFRAMES iPeriodo, int ZZPeriodo, int iIterac
    }
 }
 
-void DrawVLine(datetime t_m1, color c=clrDodgerBlue)
+// Devuelve la dirección de EMA(1) vs  EMA(5) en el TF.
+bool DirEMA1vsEMA5(ENUM_TIMEFRAMES tf, int dir)
 {
-   string name = StringFormat("Fractal_%s_%s", Par, TimeToString(t_m1, TIME_DATE|TIME_MINUTES|TIME_SECONDS));
-   
-   if(ObjectFind(0, name) >= 0) return;
-   
-   ObjectCreate(0, name, OBJ_VLINE, 0, t_m1, 0);
-   ObjectSetInteger(0, name, OBJPROP_COLOR, c);
-   ObjectSetInteger(0, name, OBJPROP_STYLE, STYLE_SOLID);
-   ObjectSetInteger(0, name, OBJPROP_WIDTH, 1);
-   
-}
+   bool salida = false;
 
-int ConversorTF(ENUM_TIMEFRAMES tf)
-{
-   int tfconvertido = 0;
+   int tfconvertido = ConversorTF(tf);
    
-   if (tf == PERIOD_M1)
-      tfconvertido = PERIOD_M1;
-   else if (tf == PERIOD_M5)
-      tfconvertido = PERIOD_M5;
-   else if (tf == PERIOD_M15)
-      tfconvertido = PERIOD_M15;
-   else if (tf == PERIOD_M30)
-      tfconvertido = PERIOD_M30;
-   else if (tf == PERIOD_H1)
-      tfconvertido = PERIOD_H1;
-   else if (tf == PERIOD_H4)
-      tfconvertido = PERIOD_H4;
-   
-   return(tfconvertido);
-   
-}
+   double ema1   = iMA(Par, tfconvertido, 1, 0, MODE_EMA,   PRICE_CLOSE, 0);
+   double ema5   = iMA(Par, tfconvertido, 5, 0, MODE_EMA,   PRICE_CLOSE, 0);
 
-void DeleteAllVLines()
-{
-   // chart_id=0 (actual), sub_window=-1 (todas), object_type=OBJ_VLINE
-   ObjectsDeleteAll(0, -1, OBJ_VLINE);
+   if ((dir == DIR_LARGOS) && (ema1 > ema5))
+      salida = true;
+   else if ((dir == DIR_CORTOS) && (ema1 < ema5))
+      salida = true;
+   else
+      salida = false;   
+   
+   return salida;
+
 }
 
 // Abre X órdenes de mercado por dirección.
@@ -794,15 +607,82 @@ int CierreOrdenes(string targetComment)
    return(contador);   
 }
 
-void DrawDaySeparator(datetime dayOpen)
+bool SalidaPatronImpulsoOnda3M32(double dFractal, int dir)
 {
-   string name = StringFormat("DaySep_%s_%s", Par, TimeToString(dayOpen, TIME_DATE));
-   if(ObjectFind(0, name) >= 0) return;
+   bool bSalidaPatronImpulsoOnda3M32 = false;
 
-   ObjectCreate(0, name, OBJ_VLINE, 0, dayOpen, 0);
-   ObjectSetInteger(0, name, OBJPROP_COLOR, ColorSeparadorDia);
-   ObjectSetInteger(0, name, OBJPROP_STYLE, EstiloSeparadorDia);
-   ObjectSetInteger(0, name, OBJPROP_WIDTH, AnchoSeparadorDia);
+   //Leyendo las ultima posición del periodo MICRO
+   ZigZag(Par, PeriodoMICRO, MV32_Depth, 4);
+// después de ZigZag(Par, PeriodoMICRO, MV32, 4);
+   if(ZZAux[0] == 0.0 || ZZAux[1] == 0.0 || ZZAux[2] == 0.0 || ZZAux[3] == 0.0) return false;
+   
+   if (dir == DIR_LARGOS)
+   {
+      if ((ZZAux[3] == dFractal) && (ZZAux[0] > ZZAux[1])
+      && (ZZAux[1] < ZZAux[2]) && (ZZAux[2] > ZZAux[3]))
+      {
+         //ONDA 3
+         bSalidaPatronImpulsoOnda3M32 = true;
+      }
+   }
+   else if (dir == DIR_CORTOS)
+   {
+      if ((ZZAux[3] == dFractal) && (ZZAux[0] < ZZAux[1])
+      && (ZZAux[1] > ZZAux[2]) && (ZZAux[2] < ZZAux[3]))
+      {
+         //ONDA 3
+         bSalidaPatronImpulsoOnda3M32 = true;
+      }      
+   }
+      
+   return(bSalidaPatronImpulsoOnda3M32);
+}
+
+
+//--------------------------FUNCIONES AUXILIARES----------------
+void DrawVLine(datetime t_m1, color c=clrDodgerBlue)
+{
+   string name = StringFormat("Fractal_%s_%s", Par, TimeToString(t_m1, TIME_DATE|TIME_MINUTES|TIME_SECONDS));
+   
+   if(ObjectFind(0, name) >= 0) return;
+   
+   ObjectCreate(0, name, OBJ_VLINE, 0, t_m1, 0);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, c);
+   ObjectSetInteger(0, name, OBJPROP_STYLE, STYLE_SOLID);
+   ObjectSetInteger(0, name, OBJPROP_WIDTH, 1);
+   
+}
+
+int ConversorTF(ENUM_TIMEFRAMES tf)
+{
+   int tfconvertido = 0;
+   
+   if (tf == PERIOD_M1)
+      tfconvertido = PERIOD_M1;
+   else if (tf == PERIOD_M5)
+      tfconvertido = PERIOD_M5;
+   else if (tf == PERIOD_M15)
+      tfconvertido = PERIOD_M15;
+   else if (tf == PERIOD_M30)
+      tfconvertido = PERIOD_M30;
+   else if (tf == PERIOD_H1)
+      tfconvertido = PERIOD_H1;
+   else if (tf == PERIOD_H4)
+      tfconvertido = PERIOD_H4;
+   
+   return(tfconvertido);
+   
+}
+
+string NowHMSStr()
+{
+   return TimeToString(TimeCurrent(), TIME_SECONDS); // "YYYY.MM.DD HH:MM:SS"
+}
+
+void DeleteAllVLines()
+{
+   // chart_id=0 (actual), sub_window=-1 (todas), object_type=OBJ_VLINE
+   ObjectsDeleteAll(0, -1, OBJ_VLINE);
 }
 
 // Pinta N días hacia atrás usando las velas D1
@@ -828,26 +708,13 @@ void EnsureTodaySeparator()
       DrawDaySeparator(todayOpen);
 }
 
-string NowHMSStr()
+void DrawDaySeparator(datetime dayOpen)
 {
-   return TimeToString(TimeCurrent(), TIME_SECONDS); // "YYYY.MM.DD HH:MM:SS"
+   string name = StringFormat("DaySep_%s_%s", Par, TimeToString(dayOpen, TIME_DATE));
+   if(ObjectFind(0, name) >= 0) return;
+
+   ObjectCreate(0, name, OBJ_VLINE, 0, dayOpen, 0);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, ColorSeparadorDia);
+   ObjectSetInteger(0, name, OBJPROP_STYLE, EstiloSeparadorDia);
+   ObjectSetInteger(0, name, OBJPROP_WIDTH, AnchoSeparadorDia);
 }
-
-void DrawOmega(datetime t, double price, int offsetPoints=50, color col=clrGold, int fontSize=32)
-{
-
-   double p    = NormalizeDouble(price - offsetPoints*Point, Digitos);
-
-   string base = StringFormat("OMEGA_%s_%d", Par, (int)t);
-   string name = base; static int seq=0;
-   while(ObjectFind(0, name) >= 0) { seq++; name = StringFormat("%s_%d", base, seq); }
-
-   ObjectCreate(0, name, OBJ_TEXT, 0, t, p);
-   ObjectSetText(name, "Ω", fontSize, "Arial", col);
-   ObjectSetInteger(0, name, OBJPROP_BACK, false);
-   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
-}
-
-
-
-//------------------------BORRAR A FUTURO-------------------------
