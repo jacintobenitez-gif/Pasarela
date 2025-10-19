@@ -58,6 +58,8 @@ datetime ZZAuxTime[];
 //Trazas
 string Traza1 = "";
 string Traza2 = "";
+string Traza3 = "";
+string Traza4 = "";
 
 int OnInit()
 {
@@ -85,21 +87,32 @@ void OnTick()
    if(PintarSeparadoresDia)
       EnsureTodaySeparator();
    
-   Traza1 = "\n" + NowHMSStr() + " GetAlignedFractalMacroZZMicro-->"; 
    fDireccion = DIR_NODIR;
    fTime = 0; 
    fValido = false;
-
+   Traza1 = "";
+   Traza2 = "";
+   Traza3 = "";
+   
    fValido = GetAlignedFractalMacroZZMicro(PeriodoFractal, fDireccion, fTime, FractalLeido, 1, 1);
-   Comment(Traza1, "\n-----------", Traza2);
+   Comment(Traza1, 
+   "\n--------------------------------", 
+   Traza2,
+   "\n--------------------------------", 
+   Traza3,
+   "\n--------------------------------", 
+   Traza4);
    
    if (LecturaMercado)
    {    
       if (fValido)
       {
+         Trazas(" Fractal: " + DoubleToStr(FractalLeido) + " valido.", Traza1); 
+
          if (FractalLeido != FractalActual) 
          {
             FractalActual = FractalLeido;  
+            Trazas(" Fractal: " + DoubleToStr(FractalLeido) + " nuevo.", Traza1); 
             
             if (PatronImpulsoOnda3M32(FractalActual, fDireccion, SLPatronImpulsoOnda3M32))
             {
@@ -112,10 +125,11 @@ void OnTick()
                
                ActivadoPatronImpulsoOnda3M32 = true;                
             }
-            Comment(Traza1, "\n-----------", Traza2);                
          }  
          else if (FractalLeido == FractalActual) 
          {
+            Trazas(" FractalLeido: " + DoubleToStr(FractalLeido) + " Fractal actual: " + DoubleToStr(FractalActual), Traza1); 
+
             if (PatronImpulsoOnda3M32(FractalActual, fDireccion, SLPatronImpulsoOnda3M32))
             {
                if (GoLive)
@@ -127,50 +141,84 @@ void OnTick()
 
                ActivadoPatronImpulsoOnda3M32 = true;                
             }
-            Comment(Traza1, "\n-----------", Traza2);
          }
+         Comment(Traza1, 
+         "\n--------------------------------", 
+         Traza2,
+         "\n--------------------------------", 
+         Traza3,
+         "\n--------------------------------", 
+         Traza4);
       }
       else
       {
-         Traza1 = "\n" + NowHMSStr() + "\nFractal Invalido-->" + DoubleToStr(FractalLeido) + " Time: " + TimeToString(fTime, TIME_DATE | TIME_SECONDS); 
+         Trazas(" \nFractal Invalido-->" + DoubleToStr(FractalLeido) + " Time: " + TimeToString(fTime, TIME_DATE | TIME_SECONDS), Traza1); 
+         Comment(Traza1, 
+         "\n--------------------------------", 
+         Traza2,
+         "\n--------------------------------", 
+         Traza3,
+         "\n--------------------------------", 
+         Traza4);         
       }
    }
    else if (EntradaMercado)
    {
-      Traza1 = Traza1 + "\n" + NowHMSStr() + " EntradaMercado: True ";                        
+      Traza3 = "";
+      Trazas(" EntradaMercado: True ", Traza3);                       
 
       if (ActivadoPatronImpulsoOnda3M32) 
       { 
-         Traza1 = Traza1 + "\n" + NowHMSStr() + " Patron encontrado: PatronImpulsoOnda3M32 "; 
+         Trazas(" Activado Patron: PatronImpulsoOnda3M32 ", Traza3); 
          
          double Lote = 0;
          
          if (Backtesting)
-            Lote = MarketInfo(Par, MODE_MINLOT);      
+         {
+            Lote = MarketInfo(Par, MODE_MINLOT);
+            Trazas(" Lote Backtesting " + DoubleToStr(Lote, Digitos), Traza3); 
+         }      
          else
+         {
             Lote = 0.1;
+            Trazas(" Lote GoLive " + DoubleToStr(Lote, Digitos), Traza3); 
+         }
                     
          
          int OperacionesEjecutadas = ExecMarket(fDireccion, 1, SLPatronImpulsoOnda3M32, Lote, Par + "-P1");
+         Trazas(" OperacionesEjecutadas: " + IntegerToString(OperacionesEjecutadas), Traza3);                       
          
          //Ejecutas orden en el mercado
          if  (OperacionesEjecutadas > 0)
          {
-            Traza1 = Traza1 + "\n" + NowHMSStr() + " OperacionesEjecutadas: " + IntegerToString(OperacionesEjecutadas);                        
             LecturaMercado = false;
             EntradaMercado = false;
             SalidaMercado = true;
          }
+         else
+         {
+            LecturaMercado = true;
+            EntradaMercado = false;
+            SalidaMercado = false;
+            ActivadoPatronImpulsoOnda3M32 = false;    
+         }
       }
 
-      Comment(Traza1);
-      
+      Comment(Traza1, 
+      "\n--------------------------------", 
+      Traza2,
+      "\n--------------------------------", 
+      Traza3,
+      "\n--------------------------------", 
+      Traza4);         
+   
    }
    else if (SalidaMercado)
    {
       //Verificar que todas las operaciones se cerraron
       //damos paso a la lectura del mercado
-      Traza1 =  Traza1 + "\n" + NowHMSStr() + " SalidaMercado True ";                        
+      Traza4 = "";
+      Trazas(" SalidaMercado: True ", Traza4);                       
       
       if (ActivadoPatronImpulsoOnda3M32)
       {
@@ -178,11 +226,12 @@ void OnTick()
          // SL: Salida controlado por el sistema. Tengo que verificar que se cerraron las operaciones abiertas.
          // SalidaPatronImpulsoOnda3M32: Salida controlada por mi.         
          string commentSalida = Par + "-P1";
+         Trazas(" Comentario Salida " + commentSalida, Traza4);                       
 
          //Salida: SL
          if (CountOpenOrdersByComment(commentSalida) == 0)
          {
-            Traza1 = Traza1 + "\n" + NowHMSStr() + " Salida SL: Operacion cerradas por StopLoss ";                        
+            Trazas(" Salida SL: Operacion cerradas por StopLoss ", Traza4);                       
             ActivadoPatronImpulsoOnda3M32 = false;
             LecturaMercado = true;
             EntradaMercado = false;
@@ -198,8 +247,7 @@ void OnTick()
             // Reset de estado si ya no quedan órdenes con ese comentario
             if (cerradas > 0)
             {
-               Traza1 = Traza1 + "\n" + NowHMSStr() + " SalidaPatronImpulsoOnda3M32: " + IntegerToString(cerradas);                        
-
+               Trazas(" SalidaPatronImpulsoOnda3M32: " + IntegerToString(cerradas), Traza4);                       
                ActivadoPatronImpulsoOnda3M32 = false;
                LecturaMercado = true;
                EntradaMercado = false;
@@ -208,7 +256,13 @@ void OnTick()
          }    
       }
       
-      Comment(Traza1);
+      Comment(Traza1, 
+      "\n--------------------------------", 
+      Traza2,
+      "\n--------------------------------", 
+      Traza3,
+      "\n--------------------------------", 
+      Traza4);
    }   
 }
 //+------------------------------------------------------------------+
@@ -219,14 +273,16 @@ bool PatronImpulsoOnda3M32(double dFractal, int dir, double &sl)
    //partir del precio del fractal encontrado entre PeriodoFractal y PeriodoMICRO.
    bool bPatronOnda3M32 = false;
    sl = 0;
+
    
    //Leyendo las ultima posición del periodo MICRO
    ZigZag(Par, PeriodoMICRO, MV32_Depth, 3);
    // justo después de ZigZag(Par, PeriodoMICRO, MV32, 4);
    if(ZZAux[0] == 0.0 || ZZAux[1] == 0.0 || ZZAux[2] == 0.0) return false;
    
-   Traza2 = Traza2 + "\nPatronImpulsoOnda3M32: " + DoubleToStr(dFractal) + " - Dir: " + IntegerToString(dir);
-   Traza2 = Traza2 + "\nR0: " + DoubleToStr(ZZAux[0], Digitos) + " R1: " + DoubleToStr(ZZAux[1], Digitos) + " R2: " + DoubleToStr(ZZAux[2], Digitos);
+   Traza2 = "";
+   Trazas(" PatronImpulsoOnda3M32: " + DoubleToStr(dFractal) + " - Dir: " + IntegerToString(dir), Traza2);
+   Trazas(" R0: " + DoubleToStr(ZZAux[0], Digitos) + " R1: " + DoubleToStr(ZZAux[1], Digitos) + " R2: " + DoubleToStr(ZZAux[2], Digitos), Traza2);
 
    if (dir == DIR_LARGOS)
    {
@@ -244,18 +300,33 @@ bool PatronImpulsoOnda3M32(double dFractal, int dir, double &sl)
          
          if ((ZZR0 == ZZAux[0]) && (ZZR1 == ZZAux[1]) && (ZZR2 == ZZAux[2]))
          {
-            Traza2 = Traza2 + "\nPatronImpulsoOnda3M32: Detectada ONDA2 Largos";
+            Trazas("\nPatronImpulsoOnda3M32: Detectada ONDA2 Largos", Traza2);
+            datetime f_TimeMICRO = 0;
+
+            Trazas("\nFindZigZagInMICRO: PeriodoMESO: " + IntegerToString(PeriodoMESO) + " Precio: " + DoubleToStr(ZZAux[0]) 
+            + " TimeMESO: " + TimeToString(ZZAuxTime[0], TIME_DATE | TIME_SECONDS)
+            + " PeriodoMICRO: " + IntegerToString(PeriodoMICRO) + " TimeMICRO:" + TimeToString(f_TimeMICRO, TIME_DATE | TIME_SECONDS), Traza2);
+            
+            if (FindZigZagInMICRO(PeriodoMESO, ZZAux[0], ZZAuxTime[0], PeriodoMICRO, f_TimeMICRO))
+            {
+               Trazas("\nFindZigZagInMICRO: True", Traza2);                
+            }
+            else
+            {
+               Trazas("\nFindZigZagInMICRO: NO encontrado", Traza2);  
+               return false;              
+            }
 
             if ((DirEMA1vsEMA5(PeriodoMICRO, dir)) && (DirEMA1vsEMA5(PeriodoMESO, dir)))
             {
-               Traza2 = Traza2 + "\nPatronImpulsoOnda3M32: Patrón confirmado";        
+               Trazas("\nPatronImpulsoOnda3M32: Patrón confirmado", Traza2);      
                //Trigger Operacion Largos
                bPatronOnda3M32 = true;
                sl = ZZR0;
             } 
             else
             {
-               Traza2 = Traza2 + "\nPatronImpulsoOnda3M32: Direccion MICRO y MESO: No alineadas";        
+               Trazas("\nPatronImpulsoOnda3M32: Direccion MICRO y MESO: No alineadas", Traza2);      
                return false;
             }                    
          }         
@@ -277,18 +348,34 @@ bool PatronImpulsoOnda3M32(double dFractal, int dir, double &sl)
          
          if ((ZZR0 == ZZAux[0]) && (ZZR1 == ZZAux[1]) && (ZZR2 == ZZAux[2]))
          {
-            Traza2 = Traza2 + "\nPatronImpulsoOnda3M32: Detectada ONDA2 Cortos";
+            Trazas("\nPatronImpulsoOnda3M32: Detectada ONDA2 Cortos", Traza2);
+
+            datetime f_TimeMICRO = 0;
+
+            Trazas("\nFindZigZagInMICRO: PeriodoMESO: " + IntegerToString(PeriodoMESO) + " Precio: " + DoubleToStr(ZZAux[0]) 
+            + " TimeMESO: " + TimeToString(ZZAuxTime[0], TIME_DATE | TIME_SECONDS)
+            + " PeriodoMICRO: " + IntegerToString(PeriodoMICRO) + " TimeMICRO:" + TimeToString(f_TimeMICRO, TIME_DATE | TIME_SECONDS), Traza2);
+            
+            if (FindZigZagInMICRO(PeriodoMESO, ZZAux[0], ZZAuxTime[0], PeriodoMICRO, f_TimeMICRO))
+            {
+               Trazas("\nFindZigZagInMICRO: True", Traza2);                
+            }
+            else
+            {
+               Trazas("\nFindZigZagInMICRO: NO encontrado", Traza2);  
+               return false;              
+            }
 
             if ((DirEMA1vsEMA5(PeriodoMICRO, dir)) && (DirEMA1vsEMA5(PeriodoMESO, dir)))
             {
-               Traza2 = Traza2 + "\nPatronImpulsoOnda3M32: Patrón confirmado";        
+               Trazas("\nPatronImpulsoOnda3M32: Patrón confirmado", Traza2);       
                //Trigger Operacion Largos
                bPatronOnda3M32 = true;
                sl = ZZR0;
             } 
             else
             {
-               Traza2 = Traza2 + "\nPatronImpulsoOnda3M32: Direccion MICRO y MESO: No alineadas";        
+               Trazas("\nPatronImpulsoOnda3M32: Direccion MICRO y MESO: No alineadas", Traza2);       
                return false;
             }                    
          }         
@@ -296,6 +383,41 @@ bool PatronImpulsoOnda3M32(double dFractal, int dir, double &sl)
    }
    
    return(bPatronOnda3M32);
+}
+
+bool SalidaPatronImpulsoOnda3M32(double dFractal, int dir)
+{
+   bool bSalidaPatronImpulsoOnda3M32 = false;
+
+   Trazas(" SalidaPatronImpulsoOnda3M32-->", Traza4);                       
+
+   //Leyendo las ultima posición del periodo MICRO
+   ZigZag(Par, PeriodoMICRO, MV32_Depth, 4);
+// después de ZigZag(Par, PeriodoMICRO, MV32, 4);
+   if(ZZAux[0] == 0.0 || ZZAux[1] == 0.0 || ZZAux[2] == 0.0 || ZZAux[3] == 0.0) return false;
+   Trazas(" R0: " + DoubleToStr(ZZAux[0], Digitos) + " R1: " + DoubleToStr(ZZAux[1], Digitos) + 
+   " R2: " + DoubleToStr(ZZAux[2], Digitos) + " R3: " + DoubleToStr(ZZAux[3], Digitos), Traza4);
+   
+   if (dir == DIR_LARGOS)
+   {
+      if ((ZZAux[3] == dFractal) && (ZZAux[0] > ZZAux[1])
+      && (ZZAux[1] < ZZAux[2]) && (ZZAux[2] > ZZAux[3]))
+      {
+         //ONDA 3
+         bSalidaPatronImpulsoOnda3M32 = true;
+      }
+   }
+   else if (dir == DIR_CORTOS)
+   {
+      if ((ZZAux[3] == dFractal) && (ZZAux[0] < ZZAux[1])
+      && (ZZAux[1] > ZZAux[2]) && (ZZAux[2] < ZZAux[3]))
+      {
+         //ONDA 3
+         bSalidaPatronImpulsoOnda3M32 = true;
+      }      
+   }
+      
+   return(bSalidaPatronImpulsoOnda3M32);
 }
 
 //--------------------------FUNCIONES BASICAS-------------------
@@ -306,6 +428,9 @@ int &f_Direccion, datetime &f_Time, double &f_Price, int lookinit = 1, int lookb
 {
    bool bGetAlignedFractalMacroZZMicro = false;
    int contador = 0;
+
+   Traza1 = "";
+   Trazas(" GetAlignedFractalMacroZZMicro-->", Traza1); 
 
    // Recorremos barras desde la más reciente (shift=0) hacia atrás
    int tfconvertido = ConversorTF(PeriodoFractalaLeer);
@@ -322,8 +447,9 @@ int &f_Direccion, datetime &f_Time, double &f_Price, int lookinit = 1, int lookb
          f_Price = up;
          f_Time = iTime(Par, tfconvertido, i);           
          f_Direccion = DIR_CORTOS;
-         Traza2 = "\n" + NowHMSStr() + " PeriodoFractalaLeer: " + IntegerToString(tfconvertido) +  " Direccion: " + IntegerToString(f_Direccion);
-         Traza2 = Traza2 + " Time: " +TimeToString(f_Time, TIME_DATE | TIME_SECONDS) + " Precio: " + DoubleToStr(f_Price);    
+
+         Trazas(" PeriodoFractalaLeer: " + IntegerToString(tfconvertido) +  " Direccion: " + IntegerToString(f_Direccion), Traza1);
+         Trazas(" Time: " + TimeToString(f_Time, TIME_DATE | TIME_SECONDS) + " Precio: " + DoubleToStr(f_Price), Traza1);  
 
          datetime f_TimeMICRO = 0;
          
@@ -353,8 +479,8 @@ int &f_Direccion, datetime &f_Time, double &f_Price, int lookinit = 1, int lookb
          f_Price = dn;
          f_Time = iTime(Par, tfconvertido, i);           
          f_Direccion = DIR_LARGOS; 
-         Traza2 = "\n" + NowHMSStr() + " PeriodoFractalaLeer: " + IntegerToString(tfconvertido) +  " Direccion: " + IntegerToString(f_Direccion);
-         Traza2 = Traza2 + " Time: " +TimeToString(f_Time, TIME_DATE | TIME_SECONDS) + " Precio: " + DoubleToStr(f_Price);         
+         Trazas(" PeriodoFractalaLeer: " + IntegerToString(tfconvertido) +  " Direccion: " + IntegerToString(f_Direccion), Traza1);
+         Trazas(" Time: " +TimeToString(f_Time, TIME_DATE | TIME_SECONDS) + " Precio: " + DoubleToStr(f_Price), Traza1);         
 
          datetime f_TimeMICRO = 0;
          
@@ -607,38 +733,6 @@ int CierreOrdenes(string targetComment)
    return(contador);   
 }
 
-bool SalidaPatronImpulsoOnda3M32(double dFractal, int dir)
-{
-   bool bSalidaPatronImpulsoOnda3M32 = false;
-
-   //Leyendo las ultima posición del periodo MICRO
-   ZigZag(Par, PeriodoMICRO, MV32_Depth, 4);
-// después de ZigZag(Par, PeriodoMICRO, MV32, 4);
-   if(ZZAux[0] == 0.0 || ZZAux[1] == 0.0 || ZZAux[2] == 0.0 || ZZAux[3] == 0.0) return false;
-   
-   if (dir == DIR_LARGOS)
-   {
-      if ((ZZAux[3] == dFractal) && (ZZAux[0] > ZZAux[1])
-      && (ZZAux[1] < ZZAux[2]) && (ZZAux[2] > ZZAux[3]))
-      {
-         //ONDA 3
-         bSalidaPatronImpulsoOnda3M32 = true;
-      }
-   }
-   else if (dir == DIR_CORTOS)
-   {
-      if ((ZZAux[3] == dFractal) && (ZZAux[0] < ZZAux[1])
-      && (ZZAux[1] > ZZAux[2]) && (ZZAux[2] < ZZAux[3]))
-      {
-         //ONDA 3
-         bSalidaPatronImpulsoOnda3M32 = true;
-      }      
-   }
-      
-   return(bSalidaPatronImpulsoOnda3M32);
-}
-
-
 //--------------------------FUNCIONES AUXILIARES----------------
 void DrawVLine(datetime t_m1, color c=clrDodgerBlue)
 {
@@ -717,4 +811,10 @@ void DrawDaySeparator(datetime dayOpen)
    ObjectSetInteger(0, name, OBJPROP_COLOR, ColorSeparadorDia);
    ObjectSetInteger(0, name, OBJPROP_STYLE, EstiloSeparadorDia);
    ObjectSetInteger(0, name, OBJPROP_WIDTH, AnchoSeparadorDia);
+}
+
+void Trazas(string cadena, string &Textofinal)
+{
+   string cadenafinal = "\n" + NowHMSStr() + cadena;
+   Textofinal = Textofinal + cadenafinal;
 }
