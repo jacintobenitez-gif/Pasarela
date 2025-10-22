@@ -5,8 +5,13 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2025, MetaQuotes Ltd."
 #property link      "https://www.mql5.com"
-#property version   "1.00"
+#property version   "7.01"
 #property strict
+
+input ENUM_TIMEFRAMES PeriodoFractal = PERIOD_M30;
+input ENUM_TIMEFRAMES PeriodoMACRO   = PERIOD_M15;
+input ENUM_TIMEFRAMES PeriodoMESO    = PERIOD_M5;
+input ENUM_TIMEFRAMES PeriodoMICRO   = PERIOD_M1;
 
 input bool  PintarSeparadoresDia   = true;
 input int   DiasSeparadoresHist    = 1;           // cuántos días hacia atrás
@@ -37,8 +42,8 @@ bool LecturaMercado = true;
 bool EntradaMercado = false;
 bool SalidaMercado = false;
 bool PintadoPrecio = false;
-
-
+bool PintadaEntrada = false;
+double version = 7.01;
 
 //Trazas
 string Traza1 = "";
@@ -53,6 +58,8 @@ double StopLoss = 0;
 //Patrones
 bool ActivadoPatronImpulsoOnda3M32 = false;
 int DireccionOnda = DIR_NODIR;
+int PasoPatronImpulsoOnda3M32 = 0;
+
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -90,16 +97,14 @@ void OnTick()
       else if (FractalLeido == FractalActual)
       {               
          if (PatronImpulsoOnda3M32(FractalActual,StopLoss, DireccionOnda))
-         {
-            if (!NotificacionEnviada)
-            {
-               SendNotification("Hora: " + TimeToString(TimeCurrent(), TIME_DATE | TIME_SECONDS) + "--> Onda3M32 en par: " + Par + " Direccion: " + IntegerToString(DireccionOnda));
-               NotificacionEnviada = true;
-            }
-            
+         {            
             ActivadoPatronImpulsoOnda3M32 = true;
             LecturaMercado = false;
-            EntradaMercado = true;   
+            EntradaMercado = true; 
+            if (!NotificacionEnviada)
+            {
+               SendNotification("CERTEZA: Entrada mercado en " + Par + " Hora: " +  TimeToString(TimeCurrent(), TIME_DATE | TIME_SECONDS));   
+            }
          }    
       }
       
@@ -115,17 +120,42 @@ void OnTick()
          if (!GoLive)
          {
             //Buscar punto de entrada preciso al mercado
-            if ((DireccionOnda == DIR_LARGOS) && (!PintadoPrecio))
-            {
-               PlotBigPointM1(0, clrRed);
-               PintadoPrecio = true;
-            }
-            else if ((DireccionOnda == DIR_CORTOS) && (!PintadoPrecio))
-            {
-               PlotBigPointM1(1, clrGreen);
-               PintadoPrecio = true;
-            }
+//            if ((DireccionOnda == DIR_LARGOS) && (!PintadoPrecio))
+//            {
+//               PlotBigPointM1WithLabel(0, DoubleToStr(Ask), clrGreen, clrBlack);
+//               PintadoPrecio = true;
+//            }
+//            else if ((DireccionOnda == DIR_CORTOS) && (!PintadoPrecio))
+//            {
+//               PlotBigPointM1WithLabel(1,DoubleToStr(Bid), clrRed, clrBlack);
+//               PintadoPrecio = true;
+//            }
             
+//            if ((PintadoPrecio) && (!PintadaEntrada))
+//            {
+//               if (WRBias_MultiTF() == DIR_LARGOS)
+//               {
+//                  PlotBigPointM1WithLabel(0, DoubleToStr(Ask), clrGold, clrBlack);   
+//                  PintadaEntrada = true;  
+                  
+//                  if (!NotificacionEnviada)
+//                  {
+//                     SendNotification("Hora: " + TimeToString(TimeCurrent(), TIME_DATE | TIME_SECONDS) + "--> Onda3M32 en par: " + Par + " Direccion: " + IntegerToString(DireccionOnda));
+//                     NotificacionEnviada = true;
+//                  }                           
+//               }
+//               else if (WRBias_MultiTF() == DIR_CORTOS)
+//               {
+//                  PlotBigPointM1WithLabel(0, DoubleToStr(Bid), clrGold, clrBlack);                              
+//                  PintadaEntrada = true;
+
+//                  if (!NotificacionEnviada)
+//                  {
+//                     SendNotification("Hora: " + TimeToString(TimeCurrent(), TIME_DATE | TIME_SECONDS) + "--> Onda3M32 en par: " + Par + " Direccion: " + IntegerToString(DireccionOnda));
+//                     NotificacionEnviada = true;
+//                  }
+//               }
+//            }
             
             LecturaMercado = false;
             EntradaMercado = false;
@@ -139,7 +169,6 @@ void OnTick()
                LecturaMercado = false;
                EntradaMercado = false;
                SalidaMercado = true;
-               ActivadoPatronImpulsoOnda3M32 = true;            
             }
          }
       }
@@ -159,6 +188,7 @@ void OnTick()
 double GetLastFractal()
 {
    Traza1 = "";
+   Traza1 = Traza1 + DoubleToStr(version);
    ZigZagFractal(Par, PERIOD_M30, MV8_Depth, 2);
    
    if (ZZAuxFractal[0] == ZZAux[0])
@@ -316,86 +346,213 @@ bool PatronImpulsoOnda3M32(double dFractal, double &sl, int &direccion)
    //Patron basado en buscar en PeriodoMICRO, Ondas 2 u Ondas 3 consecutivas, en impulso, a 
    //partir del precio del fractal encontrado entre PeriodoFractal y PeriodoMICRO.
    bool bPatronOnda3M32 = false;
-   sl = 0;
-  
-   //Leyendo las ultima posición del periodo MICRO
-   ZigZagFractal(Par, PERIOD_M1, MV32_Depth, 3);
-   // justo después de ZigZag(Par, PeriodoMICRO, MV32, 4);
-   if(ZZAux[0] == 0.0 || ZZAux[1] == 0.0 || ZZAux[2] == 0.0) return false;
-   
-   Traza2 = "";
-   Trazas(" PatronImpulsoOnda3M32: " + DoubleToStr(dFractal), Traza2);
-   Trazas(" R0: " + DoubleToStr(ZZAux[0], Digitos) + " R1: " + DoubleToStr(ZZAux[1], Digitos) + " R2: " + DoubleToStr(ZZAux[2], Digitos), Traza2);
-
-   if ((ZZAux[2] == dFractal) && (ZZAux[0] < ZZAux[1]) && (ZZAux[0] > ZZAux[2]) 
-   && (ZZAux[1] > ZZAux[2]))
-   {
-      //ONDA 2
-      Trazas(" PatronImpulsoOnda3M32: ONDA 2 Largos confirmada", Traza2);
-      direccion = DIR_LARGOS;
-   }
-   else if ((ZZAux[2] == dFractal) && (ZZAux[0] > ZZAux[1]) && (ZZAux[0] < ZZAux[2]) 
-   && (ZZAux[1] < ZZAux[2]))
-   {
-      Trazas(" PatronImpulsoOnda3M32: ONDA 2 Cortos confirmada", Traza2);   
-      direccion = DIR_CORTOS;                
-   }
-   else
-   {
-      return false;
-   }
-
-   
    double ArrayPrecioMICRO[];
-   int n1 = ArrayCopy(ArrayPrecioMICRO, ZZAux);
-   
    double ArrayFractalMICRO[];
-   int n2 = ArrayCopy(ArrayFractalMICRO, ZZAuxFractal);
+   double SLPatronImpulsoOnda3M32 = sl;
+  
+   Traza2 = "";
+   Trazas(" PatronImpulsoOnda3M32: " + DoubleToStr(dFractal) + " Paso: " + IntegerToString(PasoPatronImpulsoOnda3M32), Traza2);
    
-   // (opcional) validar
-   if(n1 <= 0)
-   { 
-      Trazas(" PatronImpulsoOnda3M32: ArrayCopy PrecioMICRO fallo: 0 elems", Traza2); 
-      return false;
-   }
-   if(n2 <= 0)
-   {
-      Trazas(" PatronImpulsoOnda3M32: ArrayCopy FractalMICRO fallo: 0 elems", Traza2); 
-      return false;
-   }
+   if (PasoPatronImpulsoOnda3M32 == 0) 
+   //Verificando igualdad ZZ entre PeriodoMICRO y Periodo MESO
+   {      
+      //Leyendo las ultima posición del periodo MICRO
+      ZigZagFractal(Par, PeriodoMICRO, MV32_Depth, 3);
+      // justo después de ZigZag(Par, PeriodoMICRO, MV32, 4);
+      if(ZZAux[0] == 0.0 || ZZAux[1] == 0.0 || ZZAux[2] == 0.0) return false;
+      
+      Trazas(" R0: " + DoubleToStr(ZZAux[0], Digitos) + " R1: " + DoubleToStr(ZZAux[1], Digitos) + " R2: " + DoubleToStr(ZZAux[2], Digitos), Traza2);
    
-   // 4) Ahora puedes recalcular MESO sin perder el MICRO clonado
-   ZigZagFractal(Par, PERIOD_M5, MV8_Depth, 3);
-   
-   if ((ArraysEqualDoubles(ArrayFractalMICRO, ZZAuxFractal, Digitos, 0)) && (ArraysEqualDoubles(ArrayPrecioMICRO, ZZAux, Digitos, 0)))
-   {
-      //MICRO y MESO iguales en Zigzag y Fractales
-      ZigZagFractal(Par, PERIOD_M5, MV32_Depth, 1);
-      double ZZR0M532 = ZZAux[0];
-      ZigZagFractal(Par, PERIOD_M15, MV8_Depth, 1);
-      double ZZV0M158 = ZZAux[0];
-   
-      if ((dFractal == ZZV0M158) && (ZZV0M158 == ZZR0M532))
+      if ((ZZAux[2] == dFractal) && (ZZAux[0] < ZZAux[1]) && (ZZAux[0] > ZZAux[2]) 
+      && (ZZAux[1] > ZZAux[2]))
       {
-         Trazas(" PatronImpulsoOnda3M32: Patron CONFIRMADO", Traza2);                 
-         bPatronOnda3M32 = true;
-         sl = ArrayPrecioMICRO[0];
+         //ONDA 2
+         direccion = DIR_LARGOS;
+      }
+      else if ((ZZAux[2] == dFractal) && (ZZAux[0] > ZZAux[1]) && (ZZAux[0] < ZZAux[2]) 
+      && (ZZAux[1] < ZZAux[2]))
+      {
+         //ONDA 2
+         direccion = DIR_CORTOS;
+      }
+   
+      int n1 = ArrayCopy(ArrayPrecioMICRO, ZZAux);
+            
+      // (opcional) validar
+      if(n1 <= 0)
+      { 
+         Trazas(" PatronImpulsoOnda3M32: ArrayCopy PrecioMICRO fallo: 0 elems", Traza2); 
+         return false;
+      }
+
+      //Leyendo las ultima posición del periodo MESO
+      ZigZagFractal(Par, PeriodoMESO, MV8_Depth, 3);
+      // justo después de ZigZag(Par, PeriodoMICRO, MV32, 4);
+      if(ZZAux[0] == 0.0 || ZZAux[1] == 0.0 || ZZAux[2] == 0.0) return false;
+      
+      if (direccion == DIR_LARGOS)
+      {
+         if ((ArrayPrecioMICRO[0] == ZZAux[0]) && (ArrayPrecioMICRO[1] == ZZAux[1])
+         && (ArrayPrecioMICRO[2] == ZZAux[2]))
+         {
+            SendNotification("CERTEZA ONDA 2 en Par: " + Par + " Hora: " +  TimeToString(TimeCurrent(), TIME_DATE | TIME_SECONDS) + " Direccion: Largos");            
+            PasoPatronImpulsoOnda3M32 = 1;
+         }        
+      }
+      else if (direccion == DIR_CORTOS)
+      {
+         if ((ArrayPrecioMICRO[0] == ZZAux[0]) && (ArrayPrecioMICRO[1] == ZZAux[1])
+         && (ArrayPrecioMICRO[2] == ZZAux[2]))
+         {
+            SendNotification("CERTEZA ONDA 2 en Par: " + Par + " Hora: " +  TimeToString(TimeCurrent(), TIME_DATE | TIME_SECONDS) + " Direccion: Cortos");            
+            PasoPatronImpulsoOnda3M32 = 1;
+         } 
+      }
+   }  
+   
+   if (PasoPatronImpulsoOnda3M32 == 1) 
+   //Verificacion que los las Ondas2 superan la resistencia de la media movil 5 exponencial en
+   //el periodo fractal
+   {
+      //Leyendo las ultima posición del periodo MICRO
+      ZigZagFractal(Par, PeriodoMICRO, MV32_Depth, 1);
+      double ZZ32Micro0 = ZZAux[0];
+      //Leyendo las ultima posición del periodo MESO
+      ZigZagFractal(Par, PeriodoMESO, MV8_Depth, 1);
+      double ZZ8Meso0 = ZZAux[0];
+      
+      double LastMM5 = GetLastMM5Now(PeriodoFractal);
+      
+      if (direccion == DIR_LARGOS)
+      {
+         if ((ZZ32Micro0 < LastMM5) && (ZZ8Meso0 < LastMM5))
+         {
+            Trazas(" PatronImpulsoOnda3M32: CERTEZA: TocaResistencia ", Traza2);               
+            SendNotification("CERTEZA Toca Resistencia en Par: " + Par + " Hora: " +  TimeToString(TimeCurrent(), TIME_DATE | TIME_SECONDS) + " Direccion: Largos");
+            PasoPatronImpulsoOnda3M32 = 2;
+         }
+      }
+      else if (direccion == DIR_CORTOS)
+      {
+         if ((ZZ32Micro0 > LastMM5) && (ZZ8Meso0 > LastMM5))
+         {
+            Trazas(" PatronImpulsoOnda3M32: CERTEZA: TocaResistencia ", Traza2);                            
+            SendNotification("CERTEZA: Toca Resistencia en Par: " + Par + " Hora: " +  TimeToString(TimeCurrent(), TIME_DATE | TIME_SECONDS) + " Direccion: Cortos");              
+            PasoPatronImpulsoOnda3M32 = 2;
+         }  
+      }    
+   }
+   
+   if (PasoPatronImpulsoOnda3M32 == 2)
+   {
+      //Leyendo las ultima posición del periodo MICRO
+      ZigZagFractal(Par, PeriodoMICRO, MV32_Depth, 3);
+      // justo después de ZigZag(Par, PeriodoMICRO, MV32, 4);
+      if(ZZAux[0] == 0.0 || ZZAux[1] == 0.0 || ZZAux[2] == 0.0) return false;
+
+      int n1 = ArrayCopy(ArrayPrecioMICRO, ZZAux);
+      
+      int n2 = ArrayCopy(ArrayFractalMICRO, ZZAuxFractal);
+      
+      // (opcional) validar
+      if(n1 <= 0)
+      { 
+         Trazas(" PatronImpulsoOnda3M32: ArrayCopy PrecioMICRO fallo: 0 elems", Traza2); 
+         return false;
+      }
+      if(n2 <= 0)
+      {
+         Trazas(" PatronImpulsoOnda3M32: ArrayCopy FractalMICRO fallo: 0 elems", Traza2); 
+         return false;
+      }
+
+      //Leyendo las ultima posición del periodo MESO
+      ZigZagFractal(Par, PeriodoMESO, MV8_Depth, 3);
+      // justo después de ZigZag(Par, PeriodoMICRO, MV32, 4);
+      if(ZZAux[0] == 0.0 || ZZAux[1] == 0.0 || ZZAux[2] == 0.0) return false;
+   
+      if ((ArraysEqualDoubles(ArrayFractalMICRO, ZZAuxFractal, Digitos, 0)) && (ArraysEqualDoubles(ArrayPrecioMICRO, ZZAux, Digitos, 0)))
+      {
+         //MICRO y MESO iguales en Zigzag y Fractales
+         ZigZagFractal(Par, PeriodoMESO, MV32_Depth, 1);
+         double ZZR0M532 = ZZAux[0];
+         ZigZagFractal(Par, PeriodoMACRO, MV8_Depth, 1);
+         double ZZV0M158 = ZZAux[0];
+      
+         if ((dFractal == ZZV0M158) && (ZZV0M158 == ZZR0M532))
+         {
+            Trazas(" PatronImpulsoOnda3M32: Patron CONFIRMADO", Traza2);                  
+            SendNotification("CERTEZA: Confirmacion fractal en " + Par + " Hora: " +  TimeToString(TimeCurrent(), TIME_DATE | TIME_SECONDS));   
+            SLPatronImpulsoOnda3M32 = ArrayPrecioMICRO[0];  
+            PasoPatronImpulsoOnda3M32 = 3;          
+         }
+         else
+         {
+            Trazas(" PatronImpulsoOnda3M32: Patron SIN confirmar", Traza2);  
+            return false;       
+         }
       }
       else
       {
-         Trazas(" PatronImpulsoOnda3M32: Patron SIN confirmar", Traza2);  
-         return false;       
-      }
+         Trazas(" PatronImpulsoOnda3M32: NO coincidencia Fractal-ZZ entre MICRO y MESO", Traza2); 
+         return false;
+      }         
    }
-   else
+   
+   if (PasoPatronImpulsoOnda3M32 == 3)
    {
-      Trazas(" PatronImpulsoOnda3M32: NO coincidencia Fractal-ZZ entre MICRO y MESO", Traza2); 
-      return false;
-   }   
-   
-   
+      bPatronOnda3M32 = true;
+      sl = SLPatronImpulsoOnda3M32;        
+   }
+  
    return(bPatronOnda3M32);
 }
+
+//--------------------------------------------------------------------
+// Devuelve DIR_LARGOS o DIR_CORTOS según %R en M15/M5/M1
+// Reglas (comparaciones inclusivas):
+//  LARGOS: M15 WPR(8) >= -20  &&  M5 WPR(8) >= -20  &&  M5 WPR(32) >= -50
+//          &&  M1 WPR(8) >= -20  &&  M1 WPR(32) >= -20
+//  CORTOS: M15 WPR(8) <= -80  &&  M5 WPR(8) <= -80  &&  M5 WPR(32) <= -50
+//          &&  M1 WPR(8) <= -80  &&  M1 WPR(32) <= -80
+//
+// Notas:
+// - Usa la variable global `Par` como símbolo.
+// - Asume que existen constantes: DIR_LARGOS (p.ej. 1), DIR_CORTOS (p.ej. -1), y opcionalmente DIR_NODIR (0).
+// - Lee el valor en la barra actual (shift=0).
+//--------------------------------------------------------------------
+int WRBias_MultiTF()
+{
+   // --- Lecturas
+   double m15_wpr8   = iWPR(Par, PERIOD_M15, 8,  0);
+   double m5_wpr8    = iWPR(Par, PERIOD_M5,  8,  0);
+   double m5_wpr32   = iWPR(Par, PERIOD_M5,  32, 0);
+   double m1_wpr8    = iWPR(Par, PERIOD_M1,  8,  0);
+   double m1_wpr32   = iWPR(Par, PERIOD_M1,  32, 0);
+
+   // --- Condiciones LARGOS
+   bool longOK =
+      (m15_wpr8  >= -20.0) &&
+      (m5_wpr8   >= -20.0) &&
+      (m5_wpr32  >= -50.0) &&
+      (m1_wpr8   >= -20.0) &&
+      (m1_wpr32  >= -20.0);
+
+   if(longOK) return DIR_LARGOS;
+
+   // --- Condiciones CORTOS
+   bool shortOK =
+      (m15_wpr8  <= -80.0) &&
+      (m5_wpr8   <= -80.0) &&
+      (m5_wpr32  <= -50.0) &&
+      (m1_wpr8   <= -80.0) &&
+      (m1_wpr32  <= -80.0);
+
+   if(shortOK) return DIR_CORTOS;
+
+   return DIR_NODIR;   
+}
+
 
 // Abre X órdenes de mercado por dirección.
 // - dir: DIR_LARGOS o DIR_CORTOS
@@ -487,6 +644,71 @@ void PlotBigPointM1(int side = 0, color c = clrDodgerBlue, int width = 6, int ar
    ObjectSetInteger(0, name, OBJPROP_READONLY, true);
 }
 
+//--------------------------------------------------------------
+// Punto gordo en Ask/Bid + texto superpuesto
+// - side: 0 = ASK, 1 = BID
+// - label: texto a mostrar sobre el punto
+// - dotColor: color del punto
+// - textColor: color del texto (usa contraste: ej. clrWhite)
+// - dotWidth: grosor del punto (6-8 = muy gordo)
+// - fontSize: tamaño de fuente del texto (12-16 típico)
+//--------------------------------------------------------------
+void PlotBigPointM1WithLabel(
+   int    side       = 0,
+   string label      = "",
+   color  dotColor   = clrDodgerBlue,
+   color  textColor  = clrWhite,
+   int    dotWidth   = 7,
+   int    fontSize   = 14
+)
+{
+   double   price = (side == 0 ? Ask : Bid);
+   price = NormalizeDouble(price, Digits);
+
+   datetime tnow = TimeCurrent(); // instante actual (vela M1 en curso)
+
+   // Nombres únicos
+   string base = StringFormat("BigDotLbl_%s_%d_%u", Symbol(), (int)tnow, GetTickCount());
+   string nameDot  = base + "_DOT";
+   string nameText = base + "_TXT";
+
+   // 1) Punto sólido (● Wingdings 159)
+   if(!ObjectCreate(0, nameDot, OBJ_ARROW, 0, tnow, price))
+   {
+      Print("ObjectCreate DOT falló: ", GetLastError());
+      return;
+   }
+   ObjectSetInteger(0, nameDot, OBJPROP_ARROWCODE, 159);
+   ObjectSetInteger(0, nameDot, OBJPROP_COLOR,     dotColor);
+   ObjectSetInteger(0, nameDot, OBJPROP_WIDTH,     dotWidth);
+   ObjectSetInteger(0, nameDot, OBJPROP_BACK,      false);
+   ObjectSetInteger(0, nameDot, OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0, nameDot, OBJPROP_HIDDEN,    false);
+   ObjectSetInteger(0, nameDot, OBJPROP_READONLY,  true);
+
+   // 2) Texto superpuesto en el mismo (t, price)
+   if(!ObjectCreate(0, nameText, OBJ_TEXT, 0, tnow, price))
+   {
+      Print("ObjectCreate TXT falló: ", GetLastError());
+      return;
+   }
+   // Centrado y encima (si tu build soporta ANCHOR_CENTER, lo usamos)
+   ObjectSetInteger(0, nameText, OBJPROP_ANCHOR, ANCHOR_CENTER);
+   ObjectSetInteger(0, nameText, OBJPROP_BACK,   false);
+   ObjectSetInteger(0, nameText, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, nameText, OBJPROP_HIDDEN, false);
+   ObjectSetInteger(0, nameText, OBJPROP_READONLY, true);
+
+   // Texto (fuente estándar legible)
+   ObjectSetText(nameText, label, fontSize, "Arial", textColor);
+
+   // Nota: si el texto se ve ligeramente descentrado por el zoom,
+   // puedes aplicar un micro-desplazamiento en precio:
+   // double pip = (Digits==3 || Digits==5) ? 10*Point : Point;
+   // ObjectMove(0, nameText, 0, tnow, price + 0.0*pip); // ajusta 0.0→±pips
+}
+
+
 ENUM_TIMEFRAMES GetCurrentPeriod()
 {
    return (ENUM_TIMEFRAMES)Period();
@@ -496,7 +718,10 @@ void Reset()
 {
    NotificacionEnviada = false;
    ActivadoPatronImpulsoOnda3M32 = false; 
-   PintadoPrecio = false;                    
+   PintadoPrecio = false; 
+   PintadaEntrada = false;  
+   StopLoss = 0;
+   PasoPatronImpulsoOnda3M32 = 0;   
 }
 
 void Trazas(string cadena, string &Textofinal)
@@ -528,6 +753,18 @@ bool DirEMA1vsEMA5(ENUM_TIMEFRAMES tf, int dir)
       salida = false;   
    
    return salida;
+
+}
+
+// Devuelve la ultima posición de la media movil 5 exponencial ahora.
+double GetLastMM5Now(ENUM_TIMEFRAMES tf)
+{
+
+   int tfconvertido = ConversorTF(tf);
+   
+   double ema5   = iMA(Par, tfconvertido, 5, 0, MODE_EMA, PRICE_CLOSE, 0);
+   
+   return ema5;
 
 }
 
@@ -629,3 +866,6 @@ void DrawDaySeparator(datetime dayOpen)
    ObjectSetInteger(0, name, OBJPROP_STYLE, EstiloSeparadorDia);
    ObjectSetInteger(0, name, OBJPROP_WIDTH, AnchoSeparadorDia);
 }
+
+
+
