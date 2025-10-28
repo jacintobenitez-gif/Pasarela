@@ -5,7 +5,6 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2025, MetaQuotes Ltd."
 #property link      "https://www.mql5.com"
-#property version   "7.01"
 #property strict
 
 input ENUM_TIMEFRAMES PeriodoFractal = PERIOD_M30;
@@ -18,7 +17,7 @@ input int   DiasSeparadoresHist    = 1;           // cuántos días hacia atrás
 input color ColorSeparadorDia      = clrDimGray;
 input int   EstiloSeparadorDia     = STYLE_DOT;
 input int   AnchoSeparadorDia      = 3;
-input bool  GoLive                 = false;
+input bool  GoLive                 = true;
 
 //ZigZag
 double   ZZAux[];
@@ -54,7 +53,9 @@ string Traza1 = "";
 string Traza2 = "";
 string Traza3 = "";
 string Traza4 = "";
-
+string Traza5 = "";
+string Traza6 = "";
+string Traza7 = "";
 int Log = 1;
 
 //Fractal
@@ -65,7 +66,12 @@ double FractalActualMESO  = 0;
 double StopLoss = 0;
 int DireccionFractal = FRACTAL_NODIRECTION;
 
-
+//Inversion
+double capital   = 0;   
+double inversion  = 0;                        
+double valorLote  = 0; 
+double lotespotencialesainvertir = 0; 
+string commentSalida = "";  
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -77,9 +83,6 @@ int OnInit()
 //---
    return(INIT_SUCCEEDED);
   }
-//+------------------------------------------------------------------+
-//| Expert deinitialization function                                 |
-//+------------------------------------------------------------------+
 
 //+------------------------------------------------------------------+
 //| Expert tick function                                             |
@@ -96,12 +99,14 @@ void OnTick()
       
       if (FractalLeido != FractalActual)
       {
+         Trazas(" Fractal Leido: " + DoubleToStr(FractalLeido, Digitos) +  " Fractal Actual: " + DoubleToStr(FractalActual, Digitos) + " Direccion Fractal: " + IntegerToString(DireccionFractal), Traza1);
          FractalActual = FractalLeido;
          //Reset
          Reset();         
       }
       else if (FractalLeido == FractalActual)
       {
+         Trazas(" Fractal Leido: " + DoubleToStr(FractalLeido, Digitos) +  " Fractal Actual: " + DoubleToStr(FractalActual, Digitos) + " Direccion Fractal: " + IntegerToString(DireccionFractal), Traza1);
          FractalActualMACRO = GetLastestFractalsInMACRO(PeriodoMACRO, FractalActual, DireccionFractal);            
          
          if (FractalActualMACRO > 0)
@@ -115,8 +120,10 @@ void OnTick()
                   if (DireccionFractal == FRACTAL_DN)
                      if ((!GoLive) && (!PintadaEntrada))
                      {
-                        PlotBigPointM1WithLabel(0, "Entrada: " + DoubleToStr(Ask), clrGreen, clrBlack);
+                        string mensaje = Par + " Entrada: " + DoubleToStr(Ask);
+                        PlotBigPointM1WithLabel(0, mensaje, clrGreen, clrBlack);
                         PintadaEntrada = true;
+                        SendNotification(mensaje);
                      }
                      else if (GoLive)
                      {
@@ -128,8 +135,10 @@ void OnTick()
                   {
                      if ((!GoLive) && (!PintadaEntrada)) 
                      {
-                        PlotBigPointM1WithLabel(1, "Entrada: " + DoubleToStr(Bid), clrRed, clrBlack);
+                        string mensaje = Par + " Entrada: " + DoubleToStr(Bid);
+                        PlotBigPointM1WithLabel(1, mensaje, clrRed, clrBlack);
                         PintadaEntrada = true;
+                        SendNotification(mensaje);
                      }
                      else if (GoLive)
                      {
@@ -138,6 +147,7 @@ void OnTick()
                         SalidaMercado = false;
                      }
                   }
+                  LotsForMarginPercent(0.7);
                }
             }
          }
@@ -149,11 +159,17 @@ void OnTick()
       "\n--------------------------------", 
       Traza3,
       "\n--------------------------------", 
-      Traza4);
+      Traza4,
+      "\n--------------------------------", 
+      Traza5,
+      "\n--------------------------------");
       
    }
    else if (EntradaMercado)
-   {      
+   { 
+      Traza6 = "";
+      Trazas("EntradaMercado", Traza6);
+          
       if (!GoLive)
       {
          LecturaMercado = false;
@@ -162,37 +178,160 @@ void OnTick()
       }
       else if (GoLive)
       { 
+         commentSalida = Par + "-P1";
+         Trazas("EntradaMercado--> CommentSalida:" + commentSalida, Traza6);
+         
+         int OperacionesAbiertas = ExecMarket(DireccionFractal, 1, StopLoss, lotespotencialesainvertir, commentSalida);
+         Trazas("EntradaMercado--> Operaciones Abiertas: " + IntegerToString(OperacionesAbiertas), Traza6);
+
          //Ejecutas orden en el mercado
-         if (ExecMarket(DireccionFractal, 1, StopLoss, 0.1, Par + "-P1") > 0)
+         if (OperacionesAbiertas > 0)
          {
             LecturaMercado = false;
             EntradaMercado = false;
             SalidaMercado  = true;
          }
-      }   
+         
+         //Me falta meter un control de numero de reintentos. Si al X reintento
+         //falla invalido la jugada.
+         
+      }
+      
+      Comment(Traza1, 
+      "\n--------------------------------", 
+      Traza2,
+      "\n--------------------------------", 
+      Traza3,
+      "\n--------------------------------", 
+      Traza4,
+      "\n--------------------------------", 
+      Traza5,
+      "\n--------------------------------",
+      Traza6);
+         
    }
    else if (SalidaMercado)
    {
-      if (!GoLive)
-      {
-         LecturaMercado = true;
-         EntradaMercado = false;
-         SalidaMercado  = false;  
-      }
-      else if (GoLive)
-      {
+      Traza7 = "\nSalidaMercado";
       
-      }             
+      bool EstadoSalida = Salida(DireccionFractal);
+      Trazas("\nEstado Salida: " + IntegerToString(EstadoSalida), Traza7);
+      
+      if (EstadoSalida)
+      {
+         if (!GoLive)
+         {
+            if (DireccionFractal == FRACTAL_DN)
+            {
+               PlotBigPointM1WithLabel(0, "Salida: " + DoubleToStr(Bid), clrBlack, clrBlack);            
+            }
+            else if (DireccionFractal == FRACTAL_UP)
+            {
+               PlotBigPointM1WithLabel(0, "Salida: " + DoubleToStr(Ask), clrBlack, clrBlack);                        
+            }
+
+            LecturaMercado = true;
+            EntradaMercado = false;
+            SalidaMercado  = false;  
+            
+         }
+         else if (GoLive)
+         {
+            int cerradas = CierreOrdenes(commentSalida);
+
+            Trazas("\nOrdenes Cerradas: " + IntegerToString(cerradas), Traza7);
+            
+            // Reset de estado si ya no quedan órdenes con ese comentario
+            if (cerradas > 0)
+            {
+               LecturaMercado = true;
+               EntradaMercado = false;
+               SalidaMercado = false;               
+            }         
+         }         
+      }
+      
+      Comment(Traza1, 
+      "\n--------------------------------", 
+      Traza2,
+      "\n--------------------------------", 
+      Traza3,
+      "\n--------------------------------", 
+      Traza4,
+      "\n--------------------------------", 
+      Traza5,
+      "\n--------------------------------",
+      Traza6, 
+      "\n--------------------------------",
+      Traza7);
    }
 }
 //+------------------------------------------------------------------+
 //+------------------------------------------------------------------+
 //                      FUNCIONES BASICAS
 
+void ZigZagFractal(string sMarket, ENUM_TIMEFRAMES iPeriodo, int ZZPeriodo, int iIteraciones)
+{
+   int    n = 0;
+   int    i = 0;
+   double zig = 0.0;
+   bool   bSalida = false;
+
+   if (iIteraciones < 1) iIteraciones = 1;
+
+   ArrayResize(ZZAux,     iIteraciones);
+   ArrayResize(ZZAuxTime, iIteraciones);
+   ArrayResize(ZZAuxFractal, iIteraciones);
+   ArrayResize(ZZAuxDirFractal, iIteraciones);
+   ArrayInitialize(ZZAux,     0.0);
+   ArrayInitialize(ZZAuxTime, 0);
+   ArrayInitialize(ZZAuxFractal, 0);
+   ArrayInitialize(ZZAuxDirFractal, 0);
+
+   // Recorre desde la barra más reciente hacia atrás
+   while ((n < iIteraciones) && (bSalida == false))
+   {
+      zig = iCustom(sMarket, iPeriodo, "ZigZag", ZZPeriodo, Deviation, Backstep, 0, i);
+      
+      if(zig > 0.0)
+      {
+         ZZAux[n]     = zig;                         // precio pivote
+         ZZAuxTime[n] = iTime(sMarket, iPeriodo, i); // tiempo pivote
+         
+         double up  = iFractals(Par, iPeriodo, MODE_UPPER, i);
+         double dn  = iFractals(Par, iPeriodo, MODE_LOWER, i);
+
+         if ((up > 0) && (up == zig))
+         {
+            ZZAuxFractal[n] = up;
+            ZZAuxDirFractal[n] = FRACTAL_UP;
+         }
+
+         if ((dn > 0) && (dn == zig))
+         {
+            ZZAuxFractal[n] = dn;
+            ZZAuxDirFractal[n] = FRACTAL_DN;
+         }
+            
+         if ((up == 0) && (dn == 0))
+         {
+            ZZAuxFractal[n] = 0;
+            ZZAuxDirFractal[n] = FRACTAL_NODIRECTION;
+         }
+         
+         n++;
+      }
+      
+      i++;
+      
+      if (i > 2000) bSalida = true;
+   }
+}
+
 double GetLastFractal(int &DirFractal)
 {
    Traza1 = "";
-   Traza1 = Traza1 + "V: " + DoubleToStr(version);
+   Traza1 = Traza1 + "V: " + DoubleToStr(version, 2) + " - GoLive: " + IntegerToString(GoLive);
    ZigZagFractal(Par, PeriodoFractal, MV8_Depth, 2);
    
    if (ZZAuxFractal[0] == ZZAux[0])
@@ -207,8 +346,8 @@ double GetLastFractal(int &DirFractal)
             DrawVLine(f_TimeMICRO, clrRed); 
          }
          
-         Trazas(" Fractal activo UP (" + IntegerToString(PeriodoFractal)  + "): " + DoubleToStr(ZZAuxFractal[0])+  " Time: " +TimeToString(ZZAuxTime[0], TIME_DATE | TIME_SECONDS), Traza1);
          DirFractal = ZZAuxDirFractal[0];
+         Trazas(" Fractal activo UP (" + IntegerToString(PeriodoFractal)  + "): " + DoubleToStr(ZZAuxFractal[0])+  " Time: " +TimeToString(ZZAuxTime[0], TIME_DATE | TIME_SECONDS) + " Direccion Fractal: " + IntegerToString(DireccionFractal), Traza1);
 
          return(ZZAux[0]);
       }
@@ -222,8 +361,8 @@ double GetLastFractal(int &DirFractal)
             DrawVLine(f_TimeMICRO, clrGreen); 
          }
 
-         Trazas(" Fractal activo DN(" + IntegerToString(PeriodoFractal)  + "): " + DoubleToStr(ZZAuxFractal[0])+  " Time: " +TimeToString(ZZAuxTime[0], TIME_DATE | TIME_SECONDS), Traza1);
          DirFractal = ZZAuxDirFractal[0];
+         Trazas(" Fractal activo DN (" + IntegerToString(PeriodoFractal)  + "): " + DoubleToStr(ZZAuxFractal[0])+  " Time: " +TimeToString(ZZAuxTime[0], TIME_DATE | TIME_SECONDS) + " Direccion Fractal: " + IntegerToString(DireccionFractal), Traza1);
 
          return(ZZAux[0]);
       }
@@ -239,8 +378,8 @@ double GetLastFractal(int &DirFractal)
             DrawVLine(f_TimeMICRO, clrRed); 
          }      
 
-         Trazas(" Fractal activo UP(" + IntegerToString(PeriodoFractal)  + "): " + DoubleToStr(ZZAuxFractal[1])+  " Time: " +TimeToString(ZZAuxTime[1], TIME_DATE | TIME_SECONDS), Traza1);
-         DirFractal = ZZAuxDirFractal[0];
+         DirFractal = ZZAuxDirFractal[1];
+         Trazas(" Fractal activo DN (" + IntegerToString(PeriodoFractal)  + "): " + DoubleToStr(ZZAuxFractal[1])+  " Time: " +TimeToString(ZZAuxTime[1], TIME_DATE | TIME_SECONDS) + " Direccion Fractal: " + IntegerToString(DireccionFractal), Traza1);
 
          return(ZZAuxFractal[1]);
       }
@@ -253,8 +392,8 @@ double GetLastFractal(int &DirFractal)
             DrawVLine(f_TimeMICRO, clrGreen); 
          }            
 
-         Trazas(" Fractal activo DN(" + IntegerToString(PeriodoFractal)  + "): " + DoubleToStr(ZZAuxFractal[1])+  " Time: " +TimeToString(ZZAuxTime[1], TIME_DATE | TIME_SECONDS), Traza1);
-         DirFractal = ZZAuxDirFractal[0];
+         DirFractal = ZZAuxDirFractal[1];
+         Trazas(" Fractal activo DN (" + IntegerToString(PeriodoFractal)  + "): " + DoubleToStr(ZZAuxFractal[1])+  " Time: " +TimeToString(ZZAuxTime[1], TIME_DATE | TIME_SECONDS) + " Direccion Fractal: " + IntegerToString(DireccionFractal), Traza1);
 
          return(ZZAuxFractal[1]);
       }      
@@ -286,14 +425,15 @@ double GetLastestFractalsInMACRO(ENUM_TIMEFRAMES tf_MACRO, double PriceFractal, 
       if ((up > 0) && (DirFractal == FRACTAL_UP))
       {
          Fractal[contador] = up;          
+         if (Log == 1) Traza2 = Traza2 + "\nGetLastestFractalsInMACRO--> Fractal UP encontrado: " + DoubleToStr(up);
          contador++;         
       }
       else if ((dn > 0) && (DirFractal == FRACTAL_DN))
       {
          Fractal[contador] = dn; 
+         if (Log == 1) Traza2 = Traza2 + "\nGetLastestFractalsInMACRO--> Fractal DN encontrado: " + DoubleToStr(dn);
          contador++;          
       }      
-
       
       if (contador >= Maxlookback)
          break;
@@ -382,10 +522,9 @@ bool GetLastestFractalInMICRO(ENUM_TIMEFRAMES tf_MICRO, double PriceFractal, dou
 
       if ((ZZAuxFractal[3] == PriceFractal) && (ZZAuxFractal[0] > ZZAuxFractal[1]) && (ZZAuxFractal[1] < ZZAuxFractal[2]) 
       && (ZZAuxFractal[1] > ZZAuxFractal[3])  && (ZZAuxFractal[2] > ZZAuxFractal[3]) && (ZZAuxFractal[1] == PriceMESO))
-      {
-   
-         if (Log == 1) Trazas(" ONDA 3 Cortos (32)", Traza4);
-         //ONDA 2 Cortos
+      {   
+         if (Log == 1) Trazas(" ONDA 3 Largos (32)", Traza4);
+         //ONDA 3 Largos
          return true;
       }
       
@@ -403,10 +542,9 @@ bool GetLastestFractalInMICRO(ENUM_TIMEFRAMES tf_MICRO, double PriceFractal, dou
 
       if ((ZZAuxFractal[3] == PriceFractal) && (ZZAuxFractal[0] < ZZAuxFractal[1]) && (ZZAuxFractal[1] > ZZAuxFractal[2]) 
       && (ZZAuxFractal[1] < ZZAuxFractal[3])  && (ZZAuxFractal[2] < ZZAuxFractal[3]) && (ZZAuxFractal[1] == PriceMESO))
-      {
-   
+      { 
          if (Log == 1) Trazas(" ONDA 3 Cortos (32)", Traza4);
-         //ONDA 2 Cortos
+         //ONDA 3 Cortos
          return true;
       }
    }
@@ -416,59 +554,54 @@ bool GetLastestFractalInMICRO(ENUM_TIMEFRAMES tf_MICRO, double PriceFractal, dou
    
 }
 
-void ZigZagFractal(string sMarket, ENUM_TIMEFRAMES iPeriodo, int ZZPeriodo, int iIteraciones)
+bool Salida(int DirFractal)
 {
-   int    n = 0;
-   int    i = 0;
-   double zig = 0.0;
-   bool   bSalida = false;
+   bool bSalida = false;
 
-   if(iIteraciones < 1) iIteraciones = 1;
+   if (Log == 1) Trazas("Salida: DireccionFractal:" + IntegerToString(DireccionFractal), Traza7);
 
-   ArrayResize(ZZAux,     iIteraciones);
-   ArrayResize(ZZAuxTime, iIteraciones);
-   ArrayResize(ZZAuxFractal, iIteraciones);
-   ArrayResize(ZZAuxDirFractal, iIteraciones);
-   ArrayInitialize(ZZAux,     0.0);
-   ArrayInitialize(ZZAuxTime, 0);
-   ArrayInitialize(ZZAuxFractal, 0);
-   ArrayInitialize(ZZAuxDirFractal, 0);
+   //Leyendo las ultima posición del periodo MICRO
+   ZigZagFractal(Par, PeriodoMICRO, MV32_Depth, 2);   
+   if(ZZAux[0] == 0.0 || ZZAux[0] == 0.0) return false;
+   double ZZ0MICRO32 = ZZAux[0];
+   double ZZ1MICRO32 = ZZAux[1];
+   
+   ZigZagFractal(Par, PeriodoMESO, MV8_Depth, 1);   
+   if(ZZAux[0] == 0.0) return false;
+   double ZZ0MESO8 = ZZAux[0];
 
-   // Recorre desde la barra más reciente hacia atrás
-   while ((n < iIteraciones) && (bSalida == false))
+   if (Log == 1) Trazas("ZZ0MICRO32:" + DoubleToStr(ZZ0MICRO32) + " ZZ1MICRO32:" + DoubleToStr(ZZ1MICRO32) + " ZZ0MESO8:" + DoubleToStr(ZZ0MESO8), Traza7);
+   
+   if (DirFractal == FRACTAL_DN) 
    {
-      zig = iCustom(sMarket, iPeriodo, "ZigZag", ZZPeriodo, Deviation, Backstep, 0, i);
-      if(zig > 0.0)
+      if (Log == 1) Trazas("Fractal DN", Traza7);
+
+      if ((ZZ0MICRO32 > ZZ1MICRO32) && (ZZ0MICRO32 == ZZ0MESO8))
       {
-         ZZAux[n]     = zig;                         // precio pivote
-         ZZAuxTime[n] = iTime(sMarket, iPeriodo, i); // tiempo pivote
-         
-         double up  = iFractals(Par, iPeriodo, MODE_UPPER, i);
-         double dn  = iFractals(Par, iPeriodo, MODE_LOWER, i);
-
-         if (up>0)
-         {
-            ZZAuxFractal[n] = up;
-            ZZAuxDirFractal[n] = FRACTAL_UP;
-         }
-
-         if (dn>0)
-         {
-            ZZAuxFractal[n] = dn;
-            ZZAuxDirFractal[n] = FRACTAL_DN;
-         }
-            
-         if ((up == 0) && (dn == 0))
-         {
-            ZZAuxFractal[n] = FRACTAL_NODIRECTION;
-            ZZAuxDirFractal[n] = FRACTAL_NODIRECTION;
-         }
-         
-         n++;
-      }
-      i++;
-      if (i > 3000) bSalida = true;
+         //ONDA 3
+         if (Log == 1) Trazas("Salida ONDA 3 Largos", Traza7);
+         Comment(Traza7, 
+         "\n--------------------------------"); 
+         bSalida = true;
+      }  
    }
+   else if (DirFractal == FRACTAL_UP) 
+   {
+      if (Log == 1) Trazas("Fractal UP", Traza7);
+
+      if ((ZZ0MICRO32 < ZZ1MICRO32) && (ZZ0MICRO32 == ZZ0MESO8))
+      {
+         //ONDA 3
+         if (Log == 1) Trazas("Salida ONDA 3 Cortos", Traza7);
+         Comment(Traza7, 
+         "\n--------------------------------");
+         bSalida = true;
+      }   
+   }      
+      
+   if (Log == 1) Trazas("Resultado:" + IntegerToString(bSalida), Traza7);
+
+   return(bSalida);
 }
 
 bool FindZigZagInMICRO(ENUM_TIMEFRAMES tfBase,
@@ -571,22 +704,65 @@ int ExecMarket(int dir, int maxOps, double sl = 0, double lots = 0.1, string com
    return (opened);
 }
 
-double LotsForMarginPercent(string sym, double percent, bool useEquity=true){
-   double basis   = useEquity ? AccountEquity() : AccountBalance();
-   double target  = basis * percent;                        // p.ej., 0.70
-   double mr1lot  = MarketInfo(sym, MODE_MARGINREQUIRED);   // margen por 1.00 lot
-   if(mr1lot <= 0.0) return 0.0;
-   double lotsRaw = target / mr1lot;
+int CierreOrdenes(string targetComment)
+{
+   RefreshRates();
+   int contador = 0;
+
+   if (Log == 1) Trazas("\nCierreOrdenes: TargetComment: " + targetComment, Traza7);
+
+   for(int i = OrdersTotal()-1; i >= 0; i--)
+   {
+      if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
+      {
+         // Comparación EXACTA (sensible a mayúsculas/minúsculas)
+         if (Log == 1) Trazas("\nOrderComment: " + OrderComment(), Traza7);
+
+         if(OrderComment() == targetComment)
+         {
+            int ticket = OrderTicket();
+            int type   = OrderType();
+            RefreshRates();
+            double price = (type==OP_BUY) ? Bid : Ask;
+            bool ok = OrderClose(ticket, OrderLots(), NormalizeDouble(price, Digitos), 3);
+            if (ok)
+               contador++;   
+            else
+               if (Log == 1) Trazas("\nOrderClose error ticket=" + IntegerToString(ticket) +  " Error code=" + IntegerToString(GetLastError()), Traza7); 
+         }
+      }
+   }
+
+   if (Log == 1) Trazas("\nCierreOrdenes: Ordenes cerradas: " + IntegerToString(contador), Traza7);  
+
+   Comment(Traza7, 
+   "\n--------------------------------");
+    
+   return(contador);   
+}
+
+double LotsForMarginPercent(double percent, bool useEquity=true)
+{
+   if (Log == 1) Traza5 = "";
+   if (Log == 1) Traza5 = Traza5 + "\nLotsForMarginPercent: " + DoubleToStr(percent, Digitos);    
+   capital   = useEquity ? AccountEquity() : AccountBalance();   
+   inversion  = capital * percent;                        // p.ej., 0.70
+   valorLote  = MarketInfo(Par, MODE_MARGINREQUIRED);   // margen por 1.00 lot
+   if(valorLote <= 0.0) return 0.0;
+   double lotsRaw = inversion / valorLote;
 
    // Ajuste a los límites/step del símbolo
-   double minL = MarketInfo(sym, MODE_MINLOT);
-   double maxL = MarketInfo(sym, MODE_MAXLOT);
-   double step = MarketInfo(sym, MODE_LOTSTEP);
-   double lots = MathFloor(lotsRaw/step) * step;            // redondeo por debajo
-   return MathMin(MathMax(lots, minL), maxL);
+   double minL = MarketInfo(Par, MODE_MINLOT);
+   double maxL = MarketInfo(Par, MODE_MAXLOT);
+   double step = MarketInfo(Par, MODE_LOTSTEP);
+   lotespotencialesainvertir = MathFloor(lotsRaw/step) * step;   
+   
+   if (Log == 1) Traza5 = Traza5 + "\nLotsForMarginPercent: Capital: " + DoubleToStr(capital, Digitos) + " Inversion: " + DoubleToStr(inversion, Digitos);
+   if (Log == 1) Traza5 = Traza5 + " Valor Lote: " + DoubleToStr(valorLote, Digitos) + " Lotes a Invertir: " + DoubleToStr(lotespotencialesainvertir, Digitos);
+
+   // redondeo por debajo
+   return MathMin(MathMax(lotespotencialesainvertir, minL), maxL);
 }
-// Ejemplo:
-// double lots = LotsForMarginPercent("BTCUSD", 0.70, true);  // ≈ 0.62 con tus datos
 
 
 //+------------------------------------------------------------------+
@@ -594,38 +770,6 @@ double LotsForMarginPercent(string sym, double percent, bool useEquity=true){
 //                      FUNCIONES AUXILIARES
 
 //--------------------------------------------------------------
-// Punto gordo en Ask o Bid en el instante actual (vela M1 en curso)
-// - side: 0 = ASK, 1 = BID
-// - c   : color del punto
-// - width: grosor del punto (5-7 queda muy gordo)
-// - arrowcode: 159 = bullet Wingdings (punto sólido)
-// Uso típico: PlotBigPointM1(0);  // ASK azul gordo ahora
-//--------------------------------------------------------------
-void PlotBigPointM1(int side = 0, color c = clrDodgerBlue, int width = 6, int arrowcode = 159)
-{
-   double price = (side == 0 ? Ask : Bid);
-   price = NormalizeDouble(price, Digits);
-
-   datetime tnow = TimeCurrent();  // instante actual (dentro de la vela M1 en curso)
-   // Nombre único por símbolo+timestamp+tickcount para evitar colisiones
-   string name = StringFormat("BigDot_%s_%d_%u", Symbol(), (int)tnow, GetTickCount());
-
-   if(!ObjectCreate(0, name, OBJ_ARROW, 0, tnow, price))
-   {
-      Print("ObjectCreate falló: ", GetLastError());
-      return;
-   }
-
-   ObjectSetInteger(0, name, OBJPROP_ARROWCODE, arrowcode); // 159 = ● (Wingdings)
-   ObjectSetInteger(0, name, OBJPROP_COLOR, c);
-   ObjectSetInteger(0, name, OBJPROP_WIDTH, width);
-   ObjectSetInteger(0, name, OBJPROP_BACK, false);    // delante de las velas
-   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
-   // Opcional: bloquear para no arrastrar sin querer
-   ObjectSetInteger(0, name, OBJPROP_READONLY, true);
-}
-
 //--------------------------------------------------------------
 // Punto gordo en Ask/Bid + texto superpuesto
 // - side: 0 = ASK, 1 = BID
@@ -702,6 +846,13 @@ void Reset()
    PintadoPrecio = false; 
    PintadaEntrada = false;  
    StopLoss = 0;
+   commentSalida = ""; 
+   Traza2 = "";
+   Traza3 = "";
+   Traza4 = "";
+   Traza5 = "";
+   Traza6 = "";
+     
 }
 
 void Trazas(string cadena, string &Textofinal)
@@ -715,68 +866,6 @@ string NowHMSStr()
    return TimeToString(TimeCurrent(), TIME_SECONDS); // "YYYY.MM.DD HH:MM:SS"
 }
 
-// Devuelve la dirección de EMA(1) vs  EMA(5) en el TF.
-bool DirEMA1vsEMA5(ENUM_TIMEFRAMES tf, int dir)
-{
-   bool salida = false;
-
-   int tfconvertido = ConversorTF(tf);
-   
-   double ema1   = iMA(Par, tfconvertido, 1, 0, MODE_EMA,   PRICE_CLOSE, 0);
-   double ema5   = iMA(Par, tfconvertido, 5, 0, MODE_EMA,   PRICE_CLOSE, 0);
-
-   if ((dir == DIR_LARGOS) && (ema1 > ema5))
-      salida = true;
-   else if ((dir == DIR_CORTOS) && (ema1 < ema5))
-      salida = true;
-   else
-      salida = false;   
-   
-   return salida;
-
-}
-
-// Devuelve la ultima posición de la media movil 5 exponencial ahora.
-double GetLastMM5Now(ENUM_TIMEFRAMES tf)
-{
-
-   int tfconvertido = ConversorTF(tf);
-   
-   double ema5   = iMA(Par, tfconvertido, 5, 0, MODE_EMA, PRICE_CLOSE, 0);
-   
-   return ema5;
-
-}
-
-// Compara dos arrays double[] elemento a elemento.
-// - digits: nº de decimales del símbolo (para NormalizeDouble)
-// - eps: tolerancia absoluta opcional (por ej., 0.0001). Si eps>0, se usa MathAbs diff<=eps.
-// Devuelve true si todos coinciden; false si tamaño distinto o algún valor no coincide.
-bool ArraysEqualDoubles(const double &a[], const double &b[], int digits, double eps=0.0)
-{
-   int na = ArraySize(a);
-   int nb = ArraySize(b);
-   if(na != nb || na <= 0) return false;
-
-   for(int i=0; i<na; i++)
-   {
-      double va = a[i];
-      double vb = b[i];
-      
-      if (va == FRACTAL_NODIRECTION) return false;
-      if (vb == FRACTAL_NODIRECTION) return false;
-
-      if(eps > 0.0)
-      {
-         if(MathAbs(va - vb) > eps) return false;
-      }
-      else
-      {
-         if(NormalizeDouble(va, digits) != NormalizeDouble(vb, digits)) return false;
-      }
-   }
-   return true;
-}
 
 void DrawVLine(datetime t_m1, color c=clrDodgerBlue)
 {
