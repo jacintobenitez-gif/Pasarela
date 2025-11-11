@@ -206,6 +206,13 @@ def _extract_sl(text: str) -> Optional[float]:
 def _extract_tps(text: str) -> List[float]:
     tps = _extract_numbers_after_keyword(text, TP_WORDS)
     if not tps:
+        # Si se indica que el objetivo está abierto/libre, no hay TPs numéricos.
+        if re.search(
+            r"(tp\d*|targets?|take\s*profit|objetivos?|meta)\s*[:=\-]?\s*(open|abierto|libre|runner|pendiente|por\s+definir|sin\s+definir|none)",
+            text,
+            flags=re.IGNORECASE,
+        ):
+            return []
         tps = _find_all_numbers(text)  # fallback amplio
     if not _has_tp_keyword(text):
         return []
@@ -242,6 +249,18 @@ def _extract_entry_candidates(text: str) -> List[Tuple[str, List[float]]]:
         if val is not None:
             cands.append(("precio", [val]))
 
+    # Fallback: patrones "BUY 4125" / "SELL LIMIT 1.0850" sin palabra clave de entrada.
+    fallback_dir_prices: List[Tuple[str, List[float]]] = []
+    for m in re.finditer(r"\b(buy|sell)\b(?:\s+(?:limit|stop))?\s*@?\s*([+-]?\d[\d .,k]*)", norm, flags=re.IGNORECASE):
+        raw_num = m.group(2)
+        val = _normalize_number_str(raw_num)
+        if val is None:
+            continue
+        tail = norm[m.end(): m.end() + 8]
+        if re.match(r"\s*(lot|lots|lote|lotes)\b", tail, flags=re.IGNORECASE):
+            continue
+        fallback_dir_prices.append(("precio", [val]))
+
     # Rangos con separadores: 3815-3812, 3629 – 3632, etc.
     for m in re.finditer(r"([+-]?\d[\d .,k]*)\s*"+RANGE_SEPARATORS+r"\s*([+-]?\d[\d .,k]*)", norm, flags=re.IGNORECASE):
         a = _normalize_number_str(m.group(1))
@@ -258,6 +277,9 @@ def _extract_entry_candidates(text: str) -> List[Tuple[str, List[float]]]:
             cands.append(("rango", [lo, hi]))
         elif len(nums) == 1:
             cands.append(("precio", [nums[0]]))
+
+    if not cands and fallback_dir_prices:
+        cands.extend(fallback_dir_prices)
 
     return cands
 
