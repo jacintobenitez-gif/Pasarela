@@ -1,0 +1,26 @@
+{
+  "channels": [
+    {
+      "id": 123456789,
+      "title": "Nombre del Canal",
+      "username": "nombrecanal",
+      "enabled": true,
+      "include_linked": false
+    },
+    {
+      "id": 987654321,
+      "title": "Otro Canal",
+      "username": "otrocanal",
+      "enabled": true,
+      "include_linked": true
+    }
+  ],
+  "metadata": {
+    "last_updated": "2025-01-XX",
+    "version": "1.0",
+    "note": "Ejecuta 'python list_channels.py' para generar automáticamente este archivo con tus canales."
+  }
+}
+
+
+

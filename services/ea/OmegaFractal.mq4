@@ -935,3 +935,5 @@ void DrawDaySeparator(datetime dayOpen)
    ObjectSetInteger(0, name, OBJPROP_STYLE, EstiloSeparadorDia);
    ObjectSetInteger(0, name, OBJPROP_WIDTH, AnchoSeparadorDia);
 }
+
+

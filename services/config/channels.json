@@ -1,0 +1,37 @@
+{
+  "channels": [
+    {
+      "id": 3070669722,
+      "title": "JB UNITED",
+      "username": "JBUNITED",
+      "enabled": true,
+      "include_linked": false
+    },
+    {
+      "id": 3158133432,
+      "title": "JBFXTradingVision",
+      "username": "JBTRADINGVISION",
+      "enabled": true,
+      "include_linked": false
+    },
+    {
+      "id": 2930391849,
+      "title": "JB TORO",
+      "username": "TOROGOLDV",
+      "enabled": true,
+      "include_linked": false
+    },
+    {
+      "id": 3060044207,
+      "title": "JB GOLD VIP IÑAKI",
+      "username": "INAQUIGOLD",
+      "enabled": true,
+      "include_linked": false
+    }
+  ],
+  "metadata": {
+    "last_updated": "2025-01-XX",
+    "version": "1.0",
+    "note": "Solo canales seleccionados: @jbunited, @jbFXTradingVision, @JBTORO, @JB GOLD VIP IÑAKI"
+  }
+}

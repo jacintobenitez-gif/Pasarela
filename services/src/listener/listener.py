@@ -1,12 +1,9 @@
 ﻿# -*- coding: utf-8 -*-
-# listener_pinned_v3p_fix2.py — Solo PINNED (+ linked) con fix chat.id y modo seguro CAPTURE_ALL
-# - Corrige filtro: usa Channel.id (positivo) en vez de event.chat_id
-# - Incluye linked_chat_id de cada canal fijado
-# - Captura edits (MessageEdited)
-# - Modo recuperación: CAPTURE_ALL=1 → captura todo canal/megagrupo (ignora filtro pinned)
-#
-# Uso modo seguro (Windows):  set CAPTURE_ALL=1
-# Uso modo seguro (Linux/Mac): export CAPTURE_ALL=1
+# listener.py — Listener de Telegram con configuración desde archivo JSON
+# - Lee canales desde archivo de configuración (config/channels.json)
+# - Captura mensajes nuevos y editados
+# - Hot-reload: recarga configuración automáticamente
+# - Publica mensajes en Redis Streams
 
 import os, csv, json, asyncio
 from datetime import datetime, timezone
@@ -104,39 +101,123 @@ async def publish_to_stream(r: Redis, fields: dict):
 # ========= TELETHON CLIENT =========
 client = TelegramClient(session_name, api_id, api_hash)
 
-# ========= PINNED ALLOWLIST =========
-PINNED_IDS = set()
-CAPTURE_ALL = os.getenv("CAPTURE_ALL", "0") == "1"  # modo seguro: captura todo canal/megagrupo
+# ========= CHANNEL CONFIGURATION =========
+CHANNEL_IDS = set()
+CHANNEL_CONFIG = {}  # {channel_id: {title, username, include_linked}}
+CONFIG_FILE = os.getenv("CHANNELS_CONFIG", str(Path(__file__).resolve().parents[1].parent / "config" / "channels.json"))
+CONFIG_FILE_MTIME = 0
 
-async def load_pinned_allowlist():
-    """Actualiza la lista de chats/canales fijados (pinned) y añade sus linked_chat_id si existen."""
-    global PINNED_IDS
-    new_ids = set()
-    pinned_list = []  # [(id, title)]
+def load_channels_from_file():
+    """Carga canales desde archivo JSON de configuración."""
+    global CHANNEL_IDS, CHANNEL_CONFIG, CONFIG_FILE_MTIME
+    
+    config_path = Path(CONFIG_FILE)
+    
+    if not config_path.exists():
+        log(f"[CONFIG] Archivo no encontrado: {CONFIG_FILE}")
+        log(f"[CONFIG] Ejecuta 'python list_channels.py' para generar el archivo de configuración.")
+        return False
+    
+    try:
+        # Verificar si el archivo cambió
+        current_mtime = config_path.stat().st_mtime
+        if current_mtime == CONFIG_FILE_MTIME:
+            return True  # Sin cambios, no recargar
+        CONFIG_FILE_MTIME = current_mtime
+        
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+        
+        new_ids = set()
+        new_config = {}
+        enabled_count = 0
+        
+        for ch in config.get("channels", []):
+            if not ch.get("enabled", True):
+                continue
+            
+            cid = int(ch["id"])
+            new_ids.add(cid)
+            new_config[cid] = {
+                "title": ch.get("title", ""),
+                "username": ch.get("username", ""),
+                "include_linked": ch.get("include_linked", False)
+            }
+            enabled_count += 1
+            
+            # Incluir linked_chat_id si está configurado
+            if ch.get("include_linked", False):
+                # Necesitamos obtener el linked_id del canal real
+                # Lo haremos en validación async
+                pass
+        
+        CHANNEL_IDS = new_ids
+        CHANNEL_CONFIG = new_config
+        
+        log(f"[CONFIG] {enabled_count} canales cargados desde {CONFIG_FILE}")
+        for cid, info in list(new_config.items())[:10]:  # Mostrar primeros 10
+            log(f"    • {cid} → {info['title'] or info['username'] or 'N/A'}")
+        if len(new_config) > 10:
+            log(f"    ... y {len(new_config) - 10} más")
+        
+        return True
+        
+    except json.JSONDecodeError as e:
+        log(f"[ERROR] JSON inválido en {CONFIG_FILE}: {e}")
+        return False
+    except Exception as e:
+        log(f"[ERROR] Error cargando configuración: {e}")
+        return False
+
+async def validate_and_enrich_channels():
+    """Valida que los canales existen y añade linked_chat_id si está configurado."""
+    global CHANNEL_IDS, CHANNEL_CONFIG
+    
+    if not CHANNEL_IDS:
+        return
+    
+    validated_ids = set()
+    validated_config = {}
+    
     async for d in client.iter_dialogs():
         ent = d.entity
-        if isinstance(ent, Channel) and not getattr(ent, "left", False):
-            title = getattr(ent, "title", "") or ""
-            username = getattr(ent, "username", "") or ""
-            if (username in EXCLUDE_USERNAMES) or (title in EXCLUDE_TITLES):
-                continue
-            if d.pinned:
-                cid = int(ent.id)
-                new_ids.add(cid)
-                pinned_list.append((cid, title))
-                # incluir también el grupo de comentarios enlazado, si existe
-                linked_id = getattr(ent, "linked_chat_id", None)
-                if linked_id:
-                    lid = int(linked_id)
-                    new_ids.add(lid)
-                    pinned_list.append((lid, f"{title} [linked]"))
-    PINNED_IDS = new_ids
-    if pinned_list:
-        log(f"[pinned] {len(pinned_list)} chats fijados activos:")
-        for cid, title in pinned_list:
-            log(f"    • {cid} → {title}")
-    else:
-        log("[pinned] Ningún chat fijado activo detectado.")
+        if not isinstance(ent, Channel) or getattr(ent, "left", False):
+            continue
+        
+        cid = int(ent.id)
+        if cid not in CHANNEL_IDS:
+            continue
+        
+        # Canal encontrado y válido
+        validated_ids.add(cid)
+        config = CHANNEL_CONFIG.get(cid, {})
+        validated_config[cid] = config.copy()
+        
+        # Si include_linked está activo, añadir el linked_chat_id
+        if config.get("include_linked", False):
+            linked_id = getattr(ent, "linked_chat_id", None)
+            if linked_id:
+                lid = int(linked_id)
+                validated_ids.add(lid)
+                validated_config[lid] = {
+                    "title": f"{config.get('title', '')} [linked]",
+                    "username": config.get("username", ""),
+                    "include_linked": False
+                }
+    
+    # Verificar canales no encontrados
+    missing = CHANNEL_IDS - validated_ids
+    if missing:
+        log(f"[WARNING] {len(missing)} canales no encontrados o sin acceso:")
+        for cid in missing:
+            config = CHANNEL_CONFIG.get(cid, {})
+            log(f"    • {cid} → {config.get('title', 'N/A')}")
+    
+    CHANNEL_IDS = validated_ids
+    CHANNEL_CONFIG = validated_config
+    
+    if validated_ids:
+        log(f"[CONFIG] {len(validated_ids)} canales validados y activos")
 
 # ========= MAIN =========
 async def main():
@@ -146,21 +227,28 @@ async def main():
     if WRITE_CSV:
         ensure_csv_header(CSV_PATH)
 
-    await load_pinned_allowlist()
-    log(f"Publicando {'TODOS los canales (CAPTURE_ALL)' if CAPTURE_ALL else 'SOLO canales fijados'} en Redis Stream: {PARSE_STREAM}. CSV={'ON' if WRITE_CSV else 'OFF'}. Ctrl+C para salir.")
+    # Cargar configuración inicial
+    if not load_channels_from_file():
+        log("[ERROR] No se pudo cargar configuración. Verifica el archivo channels.json")
+        return
+    
+    await validate_and_enrich_channels()
+    
+    if not CHANNEL_IDS:
+        log("[ERROR] Ningún canal válido encontrado. Verifica tu configuración.")
+        return
+    
+    log(f"Publicando mensajes de {len(CHANNEL_IDS)} canales en Redis Stream: {PARSE_STREAM}")
+    log(f"CSV={'ON' if WRITE_CSV else 'OFF'}. Ctrl+C para salir.")
 
-    # ==== eventos ====
-    @client.on(events.Raw)
-    async def on_raw(update):
-        if isinstance(update, (types.UpdatePinnedDialogs, types.UpdatePeerSettings,
-                               types.UpdateDialogFilters, types.UpdateDialogFilter)):
-            log("[pinned] Cambio detectado, recargando allowlist...")
-            await load_pinned_allowlist()
-
+    # Hot-reload: recargar configuración periódicamente
     async def periodic_refresh():
         while True:
-            await asyncio.sleep(300)  # cada 5 min
-            await load_pinned_allowlist()
+            await asyncio.sleep(600)  # cada 10 minutos verificar cambios
+            if load_channels_from_file():
+                await validate_and_enrich_channels()
+                log(f"[CONFIG] Recarga automática completada. {len(CHANNEL_IDS)} canales activos.")
+    
     asyncio.create_task(periodic_refresh())
 
     # ==== NEW MESSAGE ====
@@ -173,7 +261,7 @@ async def main():
             return
         if not (chat.broadcast or chat.megagroup):
             return
-        if (not CAPTURE_ALL) and (ch_id not in PINNED_IDS):
+        if ch_id not in CHANNEL_IDS:
             return
 
         title    = getattr(chat, "title", "") or ""
@@ -203,8 +291,7 @@ async def main():
             "estado_operacion": "0"
         }
         await publish_to_stream(r, fields)
-        pref = "NEW*" if CAPTURE_ALL and (ch_id not in PINNED_IDS) else "NEW "
-        log(f"{pref} | ch_id={ch_id} ({title or username}) msg_id={msg.id} rev={rev} → {PARSE_STREAM}")
+        log(f"NEW | ch_id={ch_id} ({title or username}) msg_id={msg.id} rev={rev} → {PARSE_STREAM}")
         if WRITE_CSV:
             append_csv(["new", ch_id, title, username, msg.id, rev, utc_iso(msg.date), str(msg.sender_id or ""), text])
 
@@ -217,7 +304,7 @@ async def main():
             return
         if not (chat.broadcast or chat.megagroup):
             return
-        if (not CAPTURE_ALL) and (ch_id not in PINNED_IDS):
+        if ch_id not in CHANNEL_IDS:
             return
 
         title    = getattr(chat, "title", "") or ""
@@ -247,8 +334,7 @@ async def main():
             "estado_operacion": "0"
         }
         await publish_to_stream(r, fields)
-        pref = "EDIT*" if CAPTURE_ALL and (ch_id not in PINNED_IDS) else "EDIT"
-        log(f"{pref} | ch_id={ch_id} ({title or username}) msg_id={msg.id} rev={rev} → {PARSE_STREAM}")
+        log(f"EDIT | ch_id={ch_id} ({title or username}) msg_id={msg.id} rev={rev} → {PARSE_STREAM}")
         if WRITE_CSV:
             append_csv(["edit", ch_id, title, username, msg.id, rev,
                         utc_iso(msg.edit_date or msg.date), str(msg.sender_id or ""), text])

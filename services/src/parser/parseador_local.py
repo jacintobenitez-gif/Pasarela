@@ -17,8 +17,15 @@ from dotenv import load_dotenv, find_dotenv
 ENV_PATH = find_dotenv(usecwd=True) or str(Path(__file__).resolve().parents[1].parent / ".env")
 load_dotenv(ENV_PATH, override=True)
 
-# --- PATH robusto para imports locales ---
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# --- Telegram (NUEVO, solo envío) ---
+import asyncio
+from telethon import TelegramClient, errors
+
+# --- PATH robusto para imports locales (añade padre para paquetes hermanos) ---
+BASE_DIR  = os.path.dirname(os.path.abspath(__file__))          # .../services/src/parser
+PARENT_DIR = os.path.dirname(BASE_DIR)                           # .../services/src
+if PARENT_DIR not in sys.path:
+    sys.path.insert(0, PARENT_DIR)
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
@@ -45,6 +52,101 @@ CSV_FIELDS = [
     'oid','ts_mt4_queue','symbol','order_type',
     'entry_price','sl','tp','comment','estado_operacion'
 ]
+
+# --- Telegram .env (NUEVO) ---
+TG_API_ID   = os.getenv("TELEGRAM_API_ID", "").strip()
+TG_API_HASH = os.getenv("TELEGRAM_API_HASH", "").strip()
+TG_PHONE    = os.getenv("TELEGRAM_PHONE", "").strip()
+TG_SESSION  = os.getenv("TELEGRAM_SESSION", "telethon_session").strip()
+TG_TARGETS  = os.getenv("TELEGRAM_TARGETS", "").strip()  # ej: @JBMSignals|https://t.me/JBMSignals|JBMSignals
+
+# ====== Telegram helpers (NUEVO) ======
+_TG_CLIENT = None
+_TG_ENTITY = None
+
+def _tg_loop():
+    try:
+        return asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return loop
+
+async def _tg_ensure_session():
+    """Conecta/autoriza una vez. Pide código/2FA solo la primera ejecución."""
+    global _TG_CLIENT
+    if not (TG_API_ID and TG_API_HASH and TG_PHONE and TG_TARGETS):
+        return None
+    if _TG_CLIENT is None:
+        _TG_CLIENT = TelegramClient(TG_SESSION, int(TG_API_ID), TG_API_HASH)
+    await _TG_CLIENT.connect()
+    if not await _TG_CLIENT.is_user_authorized():
+        print("[TG] Autorizando sesión…")
+        await _TG_CLIENT.send_code_request(TG_PHONE)
+        code = input("[TG] Código (SMS/Telegram): ").strip().replace(" ", "")
+        try:
+            await _TG_CLIENT.sign_in(phone=TG_PHONE, code=code)
+        except errors.SessionPasswordNeededError:
+            pwd = input("[TG] Contraseña 2FA: ")
+            await _TG_CLIENT.sign_in(password=pwd)
+    return _TG_CLIENT
+
+async def _tg_resolve_target():
+    """Resuelve destino: link → @usuario → título exacto. Cachea en _TG_ENTITY."""
+    global _TG_ENTITY
+    if _TG_ENTITY is not None:
+        return _TG_ENTITY
+    client = await _tg_ensure_session()
+    if client is None:
+        return None
+    cands = [c.strip() for c in TG_TARGETS.split("|") if c.strip()]
+
+    # 1) enlaces t.me
+    for c in cands:
+        if c.startswith(("http://","https://")) or "t.me/" in c:
+            try:
+                _TG_ENTITY = await client.get_entity(c); return _TG_ENTITY
+            except Exception: pass
+    # 2) @username
+    for c in cands:
+        u = c.lstrip("@")
+        if u:
+            try:
+                _TG_ENTITY = await client.get_entity(u); return _TG_ENTITY
+            except Exception: pass
+    # 3) título exacto
+    async for d in client.iter_dialogs():
+        if d.name in cands:
+            _TG_ENTITY = d.entity; return _TG_ENTITY
+
+    print("[TG] No se pudo resolver destino. Revisa TELEGRAM_TARGETS.")
+    return None
+
+async def _tg_send_async(texto: str):
+    if not texto:
+        return
+    client = await _tg_ensure_session()
+    if client is None:
+        return
+    entity = await _tg_resolve_target()
+    if entity is None:
+        return
+    try:
+        await client.send_message(entity=entity, message=texto)
+        print("[TG] OK enviado.")
+    except errors.FloodWaitError as fw:
+        print(f"[TG] FloodWait: espera {fw.seconds}s")
+    except errors.ChatWriteForbiddenError:
+        print("[TG] Sin permiso para publicar.")
+    except Exception as e:
+        print(f"[TG] Error: {e}")
+
+def tg_send(texto: str):
+    """Envoltura síncrona mínima para llamar desde el flujo actual."""
+    try:
+        _tg_loop().run_until_complete(_tg_send_async(texto))
+    except Exception as e:
+        print(f"[TG] WARN: {e}")
 
 def _csv_path():
     os.makedirs(MT4_QUEUE_DIR, exist_ok=True)
@@ -331,6 +433,17 @@ def main():
     print(f"[parseador] BBDD destino = {os.path.abspath(DB_FILE)} | Tabla={TABLE}")
     print(f"[parseador] Redis={REDIS_URL} Stream={REDIS_STREAM} Group={REDIS_GROUP} Consumer={CONSUMER}")
 
+    # --- Telegram: pre-resolver sesión/target una vez (si hay credenciales) ---
+    if TG_API_ID and TG_API_HASH and TG_PHONE and TG_TARGETS:
+        try:
+            _tg_loop().run_until_complete(_tg_ensure_session())
+            _tg_loop().run_until_complete(_tg_resolve_target())
+            print("[TG] Sesión/target listos.")
+        except Exception as e:
+            print(f"[TG] Aviso inicialización: {e}")
+    else:
+        print("[TG] Envío desactivado (faltan TELEGRAM_* en .env).")
+
     # asegurar tabla
     db_connect().close()
 
@@ -391,6 +504,13 @@ def main():
                                 print(f"[parseador][WARN] No se pudo actualizar ts_mt4_queue (oid={oid}): {e}")
 
                             print(f"[parseador] ✅ score=10 → CSV OK + ts_mt4_queue en BBDD. Campos operativos llegarán por ACK.")
+
+                            # --- NUEVO: enviar el MISMO 'texto' a Telegram ---
+                            try:
+                                if TG_API_ID and TG_API_HASH and TG_PHONE and TG_TARGETS and texto:
+                                    tg_send(texto)
+                            except Exception as e:
+                                print(f"[TG] Aviso envío: {e}")
 
                         else:
                             # score < 10 → ya guardamos básicos con estado=6
