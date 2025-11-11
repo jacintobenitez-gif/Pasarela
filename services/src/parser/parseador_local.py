@@ -63,14 +63,20 @@ TG_TARGETS  = os.getenv("TELEGRAM_TARGETS", "").strip()  # ej: @JBMSignals|https
 # ====== Telegram helpers (NUEVO) ======
 _TG_CLIENT = None
 _TG_ENTITY = None
+_TG_LOOP = None
 
 def _tg_loop():
+    """
+    Devuelve un event loop reutilizable evitando DeprecationWarning en Python 3.10+.
+    """
+    global _TG_LOOP
     try:
-        return asyncio.get_event_loop()
+        return asyncio.get_running_loop()
     except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        return loop
+        if _TG_LOOP is None or _TG_LOOP.is_closed():
+            _TG_LOOP = asyncio.new_event_loop()
+        asyncio.set_event_loop(_TG_LOOP)
+        return _TG_LOOP
 
 async def _tg_ensure_session():
     """Conecta/autoriza una vez. Pide código/2FA solo la primera ejecución."""
