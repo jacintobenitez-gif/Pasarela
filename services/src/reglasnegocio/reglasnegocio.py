@@ -493,6 +493,91 @@ def _build_output(clasificacion: str,
         out["observaciones"] = observaciones
     return out
 
+
+def _accion_a_etiqueta(accion: Optional[str]) -> Optional[str]:
+    if not accion:
+        return None
+    upper = accion.upper()
+    if upper.startswith("BUY"):
+        return "COMPRAR"
+    if upper.startswith("SELL"):
+        return "VENDER"
+    return None
+
+
+def _fmt_num(valor: Optional[float]) -> Optional[str]:
+    if valor is None:
+        return None
+    try:
+        num = float(valor)
+    except (TypeError, ValueError):
+        return None
+    texto = f"{num:.5f}".rstrip("0").rstrip(".")
+    return texto if texto else str(int(num))
+
+
+def formatear_senal(senal: Dict[str, Any]) -> Optional[str]:
+    """
+    Formatea una señal con score=10 al template:
+    COMPRAR/VENDER - ACTIVO - PRECIO|(LO-HI)
+
+    Nivel SL: X
+
+    Nivel TP1: X
+    Nivel TP2: X
+    Nivel TP3: X
+    """
+    if not senal or int(senal.get("score", 0)) != 10:
+        return None
+
+    accion_txt = _accion_a_etiqueta(senal.get("accion"))
+    if not accion_txt:
+        return None
+
+    activo = senal.get("activo") or "#Divisa#"
+
+    entrada_obj = senal.get("entrada") or {}
+    entrada_tipo = entrada_obj.get("tipo")
+    entrada_valores = entrada_obj.get("valores")
+    entrada_resuelta = senal.get("entrada_resuelta")
+
+    if entrada_tipo == "rango" and isinstance(entrada_valores, list) and len(entrada_valores) == 2:
+        lo, hi = entrada_valores
+        lo_txt = _fmt_num(lo)
+        hi_txt = _fmt_num(hi)
+        entrada_txt = f"({lo_txt}-{hi_txt})" if lo_txt and hi_txt else None
+    elif entrada_tipo == "precio":
+        entrada_txt = _fmt_num(entrada_resuelta if entrada_resuelta is not None else entrada_valores)
+    else:
+        entrada_txt = _fmt_num(entrada_resuelta)
+
+    if not entrada_txt:
+        return None
+
+    sl_txt = _fmt_num(senal.get("sl"))
+    if not sl_txt:
+        return None
+
+    tps = senal.get("tp") or []
+    tp_fmt = [_fmt_num(tp) for tp in tps[:3]]
+    # Completar hasta 3 líneas con None -> "-"
+    while len(tp_fmt) < 3:
+        tp_fmt.append(None)
+
+    lineas = [
+        f"{accion_txt} - {activo} - {entrada_txt}",
+        "",
+        f"Nivel SL: {sl_txt}",
+        "",
+    ]
+    for idx, val in enumerate(tp_fmt, start=1):
+        if val:
+            lineas.append(f"Nivel TP{idx}: {val}")
+        else:
+            lineas.append(f"Nivel TP{idx}: -")
+
+    return "\n".join(lineas)
+
 # =========================
 # API principal
 # =========================

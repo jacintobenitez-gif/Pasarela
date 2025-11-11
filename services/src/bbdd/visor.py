@@ -15,7 +15,7 @@ HOST, PORT = "127.0.0.1", 8080
 # Columnas a mostrar (si alguna no existe en tu tabla, aparecerá vacía)
 COLUMNS = [
     "oid","ts_utc","ts_redis_ingest","ch_id","msg_id","channel","channel_username",
-    "sender_id","text","score","estado_operacion","ts_mt4_queue",
+    "sender_id","text","texto_formateado","score","estado_operacion","ts_mt4_queue",
     "symbol","order_type","entry_price","sl","tp","comment"
 ]
 
@@ -115,7 +115,7 @@ def render_table(rows, range_key: str):
                 cell = ""
             else:
                 s = str(v)
-                cls = "text" if c == "text" else ("mono nowrap" if c in ("oid","ts_utc","ts_redis_ingest","ts_mt4_queue") else "")
+                cls = "text" if c in ("text","texto_formateado") else ("mono nowrap" if c in ("oid","ts_utc","ts_redis_ingest","ts_mt4_queue") else "")
                 cell = f"<span class='{cls}'>{html.escape(s)}</span>"
             html_parts.append(f"<td>{cell}</td>")
         html_parts.append("</tr>")

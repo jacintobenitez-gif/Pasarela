@@ -8,6 +8,7 @@
 import os, sys, csv, json, time
 import sqlite3
 import redis
+from typing import Optional
 from datetime import datetime, timezone
 from time import sleep
 
@@ -30,7 +31,7 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 # === IMPORT CORRECTO DEL ANALIZADOR (SIN NOMBRES NUEVOS) ===
-from reglasnegocio.reglasnegocio import clasificar_mensajes
+from reglasnegocio.reglasnegocio import clasificar_mensajes, formatear_senal
 
 # =================== CONFIG ===================
 REDIS_URL    = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -52,6 +53,17 @@ CSV_FIELDS = [
     'oid','ts_mt4_queue','symbol','order_type',
     'entry_price','sl','tp','comment','estado_operacion'
 ]
+
+# --- Telegram disclaimer ---
+TELEGRAM_DISCLAIMER = (
+    "Aviso: El contenido de este canal tiene carácter exclusivamente informativo y educativo; "
+    "no constituye asesoramiento financiero ni una invitación a operar. Cada miembro es responsable "
+    "de la ejecución de sus operaciones y de la gestión de su riesgo. El uso de la información se "
+    "realiza bajo el criterio y la responsabilidad de cada trader. Aquí solo se comparten referencias "
+    "de análisis, no instrucciones de inversión. En consecuencia, toda operación que usted ejecute será "
+    "una decisión personal e independiente, y los beneficios o pérdidas que se deriven dependerán únicamente "
+    "de su propia gestión."
+)
 
 # --- Telegram .env (NUEVO) ---
 TG_API_ID   = os.getenv("TELEGRAM_API_ID", "").strip()
@@ -184,6 +196,7 @@ def db_connect():
         channel_username TEXT,
         sender_id TEXT,
         text TEXT,
+        texto_formateado TEXT,
         score INTEGER,
         estado_operacion INTEGER,
         ts_mt4_queue TEXT,
@@ -199,6 +212,11 @@ def db_connect():
     # Si ya existía sin la columna PL, añadirla (ignorar si ya existe)
     try:
         cur.execute(f"ALTER TABLE {TABLE} ADD COLUMN PL REAL")
+    except Exception:
+        pass
+    # Añadir texto_formateado si no existe
+    try:
+        cur.execute(f"ALTER TABLE {TABLE} ADD COLUMN texto_formateado TEXT")
     except Exception:
         pass
     conn.commit()
@@ -220,8 +238,8 @@ def db_upsert_basico(meta: dict) -> None:
     """
     SQL = f"""
       INSERT INTO {TABLE}
-      (oid, ts_utc, ts_redis_ingest, ch_id, msg_id, channel, channel_username, sender_id, text, score, estado_operacion)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?)
+      (oid, ts_utc, ts_redis_ingest, ch_id, msg_id, channel, channel_username, sender_id, text, texto_formateado, score, estado_operacion)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(oid) DO UPDATE SET
         ts_utc           = excluded.ts_utc,
         ts_redis_ingest  = excluded.ts_redis_ingest,
@@ -231,6 +249,7 @@ def db_upsert_basico(meta: dict) -> None:
         channel_username = excluded.channel_username,
         sender_id        = excluded.sender_id,
         text             = excluded.text,
+        texto_formateado = excluded.texto_formateado,
         score            = excluded.score,
         estado_operacion = excluded.estado_operacion
     """
@@ -238,6 +257,7 @@ def db_upsert_basico(meta: dict) -> None:
         meta['oid'], meta.get('ts_utc'), meta.get('ts_redis_ingest'),
         meta.get('ch_id'), meta.get('msg_id'), meta.get('channel'),
         meta.get('channel_username'), meta.get('sender_id'), meta.get('text'),
+        meta.get('texto_formateado'),
         int(meta.get('score', 0)), int(meta.get('estado_operacion', 0)),
     )
 
@@ -397,7 +417,7 @@ def _build_fila_desde_resultado(resultados, evento):
     }
     return fila
 
-def _build_basico_desde_evento(evento, score: int, oid: str) -> dict:
+def _build_basico_desde_evento(evento, score: int, oid: str, texto_formateado: Optional[str] = None) -> dict:
     """Construye los campos básicos para Trazas_Unica a partir del mensaje Redis."""
     # Fallbacks para texto y ch_id (único cambio solicitado)
     txt = None
@@ -421,6 +441,7 @@ def _build_basico_desde_evento(evento, score: int, oid: str) -> dict:
         'channel_username': (evento.get('channel_username') if isinstance(evento, dict) else None),
         'sender_id': (evento.get('sender_id') if isinstance(evento, dict) else None),
         'text': txt,
+        'texto_formateado': texto_formateado,
         'score': int(score),
         'estado_operacion': 0 if int(score) == 10 else 6,
     }
@@ -480,6 +501,8 @@ def main():
                             print(f"[parseador] análisis→ msg_id={mid} sin resultados. ACK")
                             r.xack(REDIS_STREAM, REDIS_GROUP, _msg_id)
                             continue
+                        mejor_resultado = _best_result(resultados)
+                        texto_formateado = formatear_senal(mejor_resultado)
 
                         fila = _build_fila_desde_resultado(resultados, data)
                         score = fila['score']
@@ -489,7 +512,7 @@ def main():
                               f"type={fila['order_type']} entry={fila['entry_price']} sl={fila['sl']} tp={fila['tp']} oid={oid}")
 
                         # 0) Guardar SIEMPRE en Trazas_Unica los básicos (no operativos)
-                        basico = _build_basico_desde_evento(data, score, oid)
+                        basico = _build_basico_desde_evento(data, score, oid, texto_formateado)
                         db_upsert_basico(basico)
 
                         if score == 10:
@@ -513,8 +536,12 @@ def main():
 
                             # --- NUEVO: enviar el MISMO 'texto' a Telegram ---
                             try:
-                                if TG_API_ID and TG_API_HASH and TG_PHONE and TG_TARGETS and texto:
-                                    tg_send(texto)
+                                if TG_API_ID and TG_API_HASH and TG_PHONE and TG_TARGETS and (texto_formateado or texto):
+                                    if texto_formateado:
+                                        payload = f"{texto_formateado}\n\n{TELEGRAM_DISCLAIMER}"
+                                    else:
+                                        payload = texto
+                                    tg_send(payload)
                             except Exception as e:
                                 print(f"[TG] Aviso envío: {e}")
 
