@@ -5,7 +5,7 @@
 # Patch A: evitar duplicados (EDIT) por UNIQUE(oid) sin romper CSV.
 # Patch B: SQLite WAL + busy_timeout + reintentos ante "database is locked".
 
-import os, sys, csv, json, time
+import os, sys, csv, json, time, socket
 import sqlite3
 import redis
 from typing import Optional
@@ -48,6 +48,16 @@ MT4_QUEUE_DIR = os.getenv(
     r"C:\Users\Administrator\AppData\Roaming\MetaQuotes\Terminal\BB190E062770E27C3E79391AB0D1A117\MQL4\Files"
 )
 CSV_FILENAME  = os.getenv("MT4_QUEUE_FILENAME", "colaMT4.csv")
+CSV_ENABLED   = os.getenv("CSV_ENABLED", "1").strip() in ("1", "true", "yes", "on")  # Por defecto activado
+
+# === Socket para EA (archivo compartido) ===
+SOCKET_ENABLED = os.getenv("SOCKET_ENABLED", "true").lower() == "true"
+SOCKET_FILENAME = os.getenv("SOCKET_FILENAME", "socket_msg.txt")
+SOCKET_MODE = os.getenv("SOCKET_MODE", "socket").lower()  # valores: socket | file
+SOCKET_HOST = os.getenv("SOCKET_HOST", "127.0.0.1")
+SOCKET_PORT = int(os.getenv("SOCKET_PORT", "8888"))
+SOCKET_TIMEOUT = float(os.getenv("SOCKET_TIMEOUT", "1.0"))
+SOCKET_FALLBACK_TO_FILE = os.getenv("SOCKET_FALLBACK_TO_FILE", "true").lower() == "true"
 
 CSV_FIELDS = [
     'oid','ts_mt4_queue','symbol','order_type',
@@ -165,6 +175,53 @@ def tg_send(texto: str):
         _tg_loop().run_until_complete(_tg_send_async(texto))
     except Exception as e:
         print(f"[TG] WARN: {e}")
+
+def socket_send_to_mt5(message: str, filename: str = None) -> bool:
+    """
+    Envía un mensaje a broadcast.py para que lo distribuya al EA de MT5.
+    Se conecta como cliente a broadcast.py (127.0.0.1:8888), envía el mensaje y se desconecta.
+    Fallback a archivo compartido si está configurado.
+    Retorna True si se envió/escribió correctamente, False en caso contrario.
+    """
+    if not SOCKET_ENABLED:
+        return False
+    
+    if not message or not message.strip():
+        return False
+    trimmed = message.strip()
+
+    # --- Modo socket TCP (preferido para MT5) ---
+    if SOCKET_MODE == "socket":
+        try:
+            with socket.create_connection((SOCKET_HOST, SOCKET_PORT), timeout=SOCKET_TIMEOUT) as sock:
+                payload = (trimmed + "\n").encode("utf-8")
+                sock.sendall(payload)
+            print(f"[SOCKET] Mensaje enviado a {SOCKET_HOST}:{SOCKET_PORT}")
+            return True
+        except Exception as sock_err:
+            print(f"[SOCKET][ERROR] Fallo al enviar por socket: {sock_err}")
+            if not SOCKET_FALLBACK_TO_FILE:
+                return False
+
+    # --- Fallback: archivo compartido (compatibilidad MT4) ---
+    if filename is None:
+        filename = SOCKET_FILENAME
+
+    try:
+        common_files = os.path.join(os.getenv("APPDATA", ""), "MetaQuotes", "Terminal", "Common", "Files")
+        os.makedirs(common_files, exist_ok=True)
+
+        filepath = os.path.join(common_files, filename)
+
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(trimmed)
+
+        print(f"[SOCKET] Mensaje escrito en archivo: {filepath}")
+        return True
+
+    except Exception as e:
+        print(f"[SOCKET][ERROR] Fallo al escribir archivo: {e}")
+        return False
 
 def _csv_path():
     os.makedirs(MT4_QUEUE_DIR, exist_ok=True)
@@ -516,14 +573,17 @@ def main():
                         db_upsert_basico(basico)
 
                         if score == 10:
-                            # 1) CSV (evita duplicado por oid)
-                            try:
-                                path, wrote = csv_write_row(fila)
-                                print(f"[parseador] CSV {'OK' if wrote else 'OK(dup-skip)'} → {path} (oid={oid})")
-                                csv_ok = True
-                            except Exception as e:
-                                print(f"[parseador][ERROR] CSV FAIL (oid={oid}): {e}")
-                                csv_ok = False
+                            # 1) CSV (evita duplicado por oid) - Solo si CSV_ENABLED está activado
+                            if CSV_ENABLED:
+                                try:
+                                    path, wrote = csv_write_row(fila)
+                                    print(f"[parseador] CSV {'OK' if wrote else 'OK(dup-skip)'} → {path} (oid={oid})")
+                                    csv_ok = True
+                                except Exception as e:
+                                    print(f"[parseador][ERROR] CSV FAIL (oid={oid}): {e}")
+                                    csv_ok = False
+                            else:
+                                print(f"[parseador] CSV DESACTIVADO (CSV_ENABLED=0) → omitido (oid={oid})")
 
                             # 1b) Parche: reflejar inmediatamente ts_mt4_queue en Trazas_Unica
                             try:
@@ -532,15 +592,24 @@ def main():
                             except Exception as e:
                                 print(f"[parseador][WARN] No se pudo actualizar ts_mt4_queue (oid={oid}): {e}")
 
-                            print(f"[parseador] ✅ score=10 → CSV OK + ts_mt4_queue en BBDD. Campos operativos llegarán por ACK.")
+                            csv_status = "CSV OK" if CSV_ENABLED else "CSV desactivado"
+                            print(f"[parseador] ✅ score=10 → {csv_status} + ts_mt4_queue en BBDD. Campos operativos llegarán por ACK.")
 
-                            # --- NUEVO: enviar el MISMO 'texto' a Telegram ---
+                            # --- NUEVO: enviar texto formateado al EA de socket ---
                             try:
-                                if TG_API_ID and TG_API_HASH and TG_PHONE and TG_TARGETS and (texto_formateado or texto):
-                                    if texto_formateado:
-                                        payload = f"{texto_formateado}\n\n{TELEGRAM_DISCLAIMER}"
-                                    else:
-                                        payload = texto
+                                if texto_formateado:
+                                    socket_send_to_mt5(texto_formateado)
+                                    print(f"[parseador] SOCKET OK → texto formateado enviado a EA (oid={oid})")
+                                elif texto:
+                                    socket_send_to_mt5(texto)
+                                    print(f"[parseador] SOCKET OK → texto original enviado a EA (oid={oid})")
+                            except Exception as e:
+                                print(f"[parseador][SOCKET][WARN] No se pudo enviar al EA (oid={oid}): {e}")
+
+                            # --- NUEVO: enviar texto formateado a Telegram (SOLO si existe) ---
+                            try:
+                                if texto_formateado and TG_API_ID and TG_API_HASH and TG_PHONE and TG_TARGETS:
+                                    payload = f"{texto_formateado}\n\n{TELEGRAM_DISCLAIMER}"
                                     tg_send(payload)
                             except Exception as e:
                                 print(f"[TG] Aviso envío: {e}")
