@@ -379,6 +379,17 @@ def db_update_ts_mt4_queue(oid: str, tsq: str) -> None:
     raise sqlite3.OperationalError("database is locked (retries exhausted)")
 
 # =================== CSV ===================
+def csv_row_to_string(fila):
+    """
+    Convierte una fila dict a string CSV con el mismo formato que se escribe en el archivo.
+    Retorna la línea CSV como string (sin newline final).
+    """
+    import io
+    output = io.StringIO()
+    w = csv.DictWriter(output, fieldnames=CSV_FIELDS)
+    w.writerow({k: fila.get(k, "") for k in CSV_FIELDS})
+    return output.getvalue().rstrip('\r\n')
+
 def csv_write_row(fila):
     """
     Escribe asegurando cabecera y evitando duplicar por oid.
@@ -595,14 +606,11 @@ def main():
                             csv_status = "CSV OK" if CSV_ENABLED else "CSV desactivado"
                             print(f"[parseador] ✅ score=10 → {csv_status} + ts_mt4_queue en BBDD. Campos operativos llegarán por ACK.")
 
-                            # --- NUEVO: enviar texto formateado al EA de socket ---
+                            # --- NUEVO: enviar fila CSV al EA de socket (mismo formato que se escribe en CSV) ---
                             try:
-                                if texto_formateado:
-                                    socket_send_to_mt5(texto_formateado)
-                                    print(f"[parseador] SOCKET OK → texto formateado enviado a EA (oid={oid})")
-                                elif texto:
-                                    socket_send_to_mt5(texto)
-                                    print(f"[parseador] SOCKET OK → texto original enviado a EA (oid={oid})")
+                                csv_line = csv_row_to_string(fila)
+                                socket_send_to_mt5(csv_line)
+                                print(f"[parseador] SOCKET OK → fila CSV enviada a EA (oid={oid})")
                             except Exception as e:
                                 print(f"[parseador][SOCKET][WARN] No se pudo enviar al EA (oid={oid}): {e}")
 
