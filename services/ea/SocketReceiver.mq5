@@ -21,6 +21,125 @@ string   pendingBuffer  = "";
 int      messageCount   = 0;
 string   lastMessage    = "";
 
+// --- Cola interna (24h) para almacenar las señales recibidas ---
+struct SignalEntry
+{
+   string   oid;
+   string   ts_mt4_queue_text;
+   datetime ts_mt4_queue;
+   string   symbol;
+   string   order_type;
+   double   entry_price;
+   double   sl;
+   double   tp;
+   string   comment;
+   int      estado_operacion;
+   datetime received_at;
+};
+
+SignalEntry g_queue[];
+
+const int QUEUE_RETENTION_SECONDS = 86400; // 24h
+const int QUEUE_MAX_SIZE          = 500;
+
+string StrTrim(string s)
+{
+   StringTrimLeft(s);
+   StringTrimRight(s);
+   return s;
+}
+
+string FormatSignalDisplay(const SignalEntry &entry)
+{
+   string ts = TimeToString(entry.received_at, TIME_SECONDS);
+   string price = DoubleToString(entry.entry_price, 5);
+   string slStr = DoubleToString(entry.sl, 5);
+   string tpStr = DoubleToString(entry.tp, 5);
+   string summary = ts + " " + entry.order_type + " " + entry.symbol + " @" + price;
+   summary += " SL:" + slStr + " TP:" + tpStr;
+   return summary;
+}
+
+datetime ParseIsoTimestamp(const string src, string &normalized)
+{
+   normalized = src;
+   int dotPos = StringFind(normalized, ".");
+   if(dotPos >= 0)
+   {
+      normalized = StringSubstr(normalized, 0, dotPos);
+   }
+   int zPos = StringFind(normalized, "Z");
+   if(zPos >= 0)
+   {
+      normalized = StringSubstr(normalized, 0, zPos);
+   }
+   StringReplace(normalized, "T", " ");
+   StringTrimLeft(normalized);
+   StringTrimRight(normalized);
+   datetime ts = StringToTime(normalized);
+   return ts;
+}
+
+void QueueRemoveAt(int index)
+{
+   int total = ArraySize(g_queue);
+   if(index < 0 || index >= total)
+      return;
+   for(int i = index; i < total - 1; i++)
+      g_queue[i] = g_queue[i + 1];
+   ArrayResize(g_queue, total - 1);
+}
+
+void TrimQueue()
+{
+   int total = ArraySize(g_queue);
+   if(total == 0)
+      return;
+
+   datetime now = TimeCurrent();
+   int i = 0;
+   while(i < ArraySize(g_queue))
+   {
+      if(now - g_queue[i].received_at > QUEUE_RETENTION_SECONDS)
+      {
+         QueueRemoveAt(i);
+         continue;
+      }
+      i++;
+   }
+
+   while(ArraySize(g_queue) > QUEUE_MAX_SIZE)
+   {
+      QueueRemoveAt(0);
+   }
+}
+
+bool ParseSignalCsv(const string line, SignalEntry &outEntry)
+{
+   string parts[];
+   int count = StringSplit(line, ',', parts);
+   if(count < 9)
+      return false;
+
+   for(int i = 0; i < count; i++)
+      parts[i] = StrTrim(parts[i]);
+
+   outEntry.oid                = parts[0];
+   outEntry.ts_mt4_queue_text  = parts[1];
+   string normalizedTs         = "";
+   outEntry.ts_mt4_queue       = ParseIsoTimestamp(parts[1], normalizedTs);
+   outEntry.symbol             = parts[2];
+   outEntry.order_type         = parts[3];
+   outEntry.entry_price        = StringToDouble(parts[4]);
+   outEntry.sl                 = StringToDouble(parts[5]);
+   outEntry.tp                 = StringToDouble(parts[6]);
+   outEntry.comment            = parts[7];
+   outEntry.estado_operacion   = (int)StringToInteger(parts[8]);
+   outEntry.received_at        = TimeCurrent();
+
+   return true;
+}
+
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
 //+------------------------------------------------------------------+
@@ -61,6 +180,7 @@ void OnTimer()
          AttemptConnect();
          lastReconnect = now;
       }
+      TrimQueue();
       UpdateDisplay();
       return;
    }
@@ -70,11 +190,13 @@ void OnTimer()
       Print("[SocketReceiver] Conexión perdida. Reintentando...");
       SocketClose(socketHandle);
       socketHandle = INVALID_HANDLE;
+      TrimQueue();
       UpdateDisplay();
       return;
    }
 
    ReceiveMessages();
+   TrimQueue();
    UpdateDisplay();
 }
 
@@ -232,6 +354,20 @@ void ProcessMessage(string msg)
       Alert("SocketReceiver: ", msg);
 
    lastMessage = msg;
+
+    SignalEntry entry;
+    if(ParseSignalCsv(msg, entry))
+    {
+       int size = ArraySize(g_queue);
+       ArrayResize(g_queue, size + 1);
+       g_queue[size] = entry;
+       TrimQueue();
+       Print("[SocketReceiver] 📦 Cola → agregado oid=", entry.oid, " (total=", ArraySize(g_queue), ")");
+    }
+    else
+    {
+       Print("[SocketReceiver] ⚠️ No se pudo parsear la línea recibida como CSV válido.");
+    }
 }
 
 //+------------------------------------------------------------------+
@@ -258,6 +394,23 @@ void UpdateDisplay()
       {
          display += "\nÚltimo mensaje:\n" + lastMessage + "\n";
       }
+   }
+
+   int queueSize = ArraySize(g_queue);
+   display += "\nCola señales: " + IntegerToString(queueSize) + "\n";
+   if(queueSize > 0)
+   {
+      int start = queueSize - 5;
+      if(start < 0)
+         start = 0;
+      for(int i = start; i < queueSize; i++)
+      {
+         display += IntegerToString(i + 1) + ") " + FormatSignalDisplay(g_queue[i]) + "\n";
+      }
+   }
+   else
+   {
+      display += "(vacía)\n";
    }
 
    Comment(display);

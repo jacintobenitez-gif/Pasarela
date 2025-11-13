@@ -5,7 +5,7 @@
 # Patch A: evitar duplicados (EDIT) por UNIQUE(oid) sin romper CSV.
 # Patch B: SQLite WAL + busy_timeout + reintentos ante "database is locked".
 
-import os, sys, csv, json, time, socket
+import os, sys, csv, json, time, socket, threading, atexit
 import sqlite3
 import redis
 from typing import Optional
@@ -59,10 +59,148 @@ SOCKET_PORT = int(os.getenv("SOCKET_PORT", "8888"))
 SOCKET_TIMEOUT = float(os.getenv("SOCKET_TIMEOUT", "1.0"))
 SOCKET_FALLBACK_TO_FILE = os.getenv("SOCKET_FALLBACK_TO_FILE", "true").lower() == "true"
 
+_BROADCAST_SERVER = None
+
 CSV_FIELDS = [
     'oid','ts_mt4_queue','symbol','order_type',
     'entry_price','sl','tp','comment','estado_operacion'
 ]
+
+def _should_run_broadcast() -> bool:
+    return SOCKET_ENABLED and SOCKET_MODE == "socket"
+
+class BroadcastWorker(threading.Thread):
+    def __init__(self, host: str, port: int):
+        super().__init__(daemon=True)
+        self.host = host
+        self.port = port
+        self.sock = None
+        self.clients = []
+        self.clients_lock = threading.Lock()
+        self.stop_event = threading.Event()
+
+    def run(self):
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            self.sock.bind((self.host, self.port))
+            self.sock.listen(8)
+            print(f"[broadcast] escuchando en {self.host}:{self.port}")
+            while not self.stop_event.is_set():
+                try:
+                    self.sock.settimeout(1.0)
+                    conn, addr = self.sock.accept()
+                except socket.timeout:
+                    continue
+                except OSError:
+                    if self.stop_event.is_set():
+                        break
+                    else:
+                        continue
+                print(f"[broadcast] cliente conectado {addr}")
+                with self.clients_lock:
+                    self.clients.append(conn)
+                threading.Thread(target=self._handle_client, args=(conn, addr), daemon=True).start()
+        except Exception as e:
+            print(f"[broadcast][ERROR] {e}")
+        finally:
+            self._close_all()
+            if self.sock:
+                try:
+                    self.sock.close()
+                except Exception:
+                    pass
+
+    def _handle_client(self, conn, addr):
+        try:
+            conn.settimeout(1.0)
+            while not self.stop_event.is_set():
+                try:
+                    data = conn.recv(1024)
+                    if not data:
+                        break
+                except socket.timeout:
+                    continue
+                except Exception:
+                    break
+        finally:
+            print(f"[broadcast] cliente desconectado {addr}")
+            with self.clients_lock:
+                try:
+                    self.clients.remove(conn)
+                except ValueError:
+                    pass
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    def broadcast(self, message: str):
+        payload = (message.rstrip("\r\n") + "\n").encode("utf-8")
+        dead = []
+        with self.clients_lock:
+            for c in self.clients:
+                try:
+                    c.sendall(payload)
+                except Exception as e:
+                    dead.append(c)
+                    print(f"[broadcast][WARN] error enviando a cliente: {e}")
+            for c in dead:
+                try:
+                    self.clients.remove(c)
+                except ValueError:
+                    pass
+                try:
+                    c.close()
+                except Exception:
+                    pass
+
+    def stop(self):
+        self.stop_event.set()
+        if self.sock:
+            try:
+                self.sock.close()
+            except Exception:
+                pass
+
+    def _close_all(self):
+        with self.clients_lock:
+            for c in self.clients:
+                try:
+                    c.close()
+                except Exception:
+                    pass
+            self.clients.clear()
+
+
+def _start_broadcast():
+    global _BROADCAST_SERVER
+    if not _should_run_broadcast():
+        return
+    if _BROADCAST_SERVER is not None:
+        return
+    server = BroadcastWorker(SOCKET_HOST, SOCKET_PORT)
+    server.start()
+    _BROADCAST_SERVER = server
+
+
+def _stop_broadcast():
+    global _BROADCAST_SERVER
+    if _BROADCAST_SERVER is None:
+        return
+    _BROADCAST_SERVER.stop()
+    _BROADCAST_SERVER = None
+
+
+def _ensure_broadcast_alive():
+    if not _should_run_broadcast():
+        return
+    global _BROADCAST_SERVER
+    if _BROADCAST_SERVER is None:
+        _start_broadcast()
+
+
+atexit.register(_stop_broadcast)
 
 # --- Telegram disclaimer ---
 TELEGRAM_DISCLAIMER = (
@@ -179,8 +317,7 @@ def tg_send(texto: str):
 def socket_send_to_mt5(message: str, filename: str = None) -> bool:
     """
     Envía un mensaje a broadcast.py para que lo distribuya al EA de MT5.
-    Se conecta como cliente a broadcast.py (127.0.0.1:8888), envía el mensaje y se desconecta.
-    Fallback a archivo compartido si está configurado.
+    Mantiene una conexión persistente al servidor. Fallback a archivo compartido si está configurado.
     Retorna True si se envió/escribió correctamente, False en caso contrario.
     """
     if not SOCKET_ENABLED:
@@ -190,18 +327,28 @@ def socket_send_to_mt5(message: str, filename: str = None) -> bool:
         return False
     trimmed = message.strip()
 
-    # --- Modo socket TCP (preferido para MT5) ---
+    # --- Servidor integrado (preferido para MT5) ---
+    send_success = False
+
     if SOCKET_MODE == "socket":
-        try:
-            with socket.create_connection((SOCKET_HOST, SOCKET_PORT), timeout=SOCKET_TIMEOUT) as sock:
-                payload = (trimmed + "\n").encode("utf-8")
-                sock.sendall(payload)
-            print(f"[SOCKET] Mensaje enviado a {SOCKET_HOST}:{SOCKET_PORT}")
-            return True
-        except Exception as sock_err:
-            print(f"[SOCKET][ERROR] Fallo al enviar por socket: {sock_err}")
-            if not SOCKET_FALLBACK_TO_FILE:
-                return False
+        _ensure_broadcast_alive()
+        global _BROADCAST_SERVER
+        if _BROADCAST_SERVER is not None:
+            try:
+                _BROADCAST_SERVER.broadcast(trimmed)
+                print(f"[SOCKET] Mensaje enviado a clientes conectados ({SOCKET_HOST}:{SOCKET_PORT})")
+                send_success = True
+            except Exception as sock_err:
+                print(f"[SOCKET][ERROR] Error en broadcast interno: {sock_err}")
+        else:
+            print("[SOCKET][WARN] Servidor interno no disponible.")
+
+    if send_success:
+        return True
+
+    if not SOCKET_FALLBACK_TO_FILE:
+        return False
+    print("[SOCKET][WARN] Usando fallback a archivo compartido.")
 
     # --- Fallback: archivo compartido (compatibilidad MT4) ---
     if filename is None:
@@ -528,6 +675,10 @@ def main():
     print(f"[parseador] BBDD destino = {os.path.abspath(DB_FILE)} | Tabla={TABLE}")
     print(f"[parseador] Redis={REDIS_URL} Stream={REDIS_STREAM} Group={REDIS_GROUP} Consumer={CONSUMER}")
 
+    _ensure_broadcast_alive()
+    if not _should_run_broadcast():
+        print("[parseador] broadcast interno desactivado (SOCKET_MODE != 'socket' o SOCKET_ENABLED=0).")
+
     # --- Telegram: pre-resolver sesión/target una vez (si hay credenciales) ---
     if TG_API_ID and TG_API_HASH and TG_PHONE and TG_TARGETS:
         try:
@@ -547,6 +698,7 @@ def main():
 
     while True:
         try:
+            _ensure_broadcast_alive()
             resp = r.xreadgroup(groupname=REDIS_GROUP, consumername=CONSUMER,
                                 streams={REDIS_STREAM: ">"}, count=1, block=5000)
             if not resp:
@@ -638,6 +790,7 @@ def main():
         except Exception as loop_err:
             print(f"[parseador][ERROR] Loop: {loop_err}")
             time.sleep(1)  # backoff suave
+    _stop_broadcast()
 
 if __name__ == "__main__":
     main()
