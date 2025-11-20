@@ -219,7 +219,8 @@ TG_API_HASH = os.getenv("TELEGRAM_API_HASH", "").strip()
 TG_PHONE    = os.getenv("TELEGRAM_PHONE", "").strip()
 TG_SESSION  = os.getenv("TELEGRAM_SESSION", "telethon_session").strip()
 TG_TARGETS  = os.getenv("TELEGRAM_TARGETS", "").strip()  # ej: @JBMSignals|https://t.me/JBMSignals|JBMSignals
-TELEGRAM_ALERT_ENABLED = os.getenv("TELEGRAM_ALERT_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on")
+TELEGRAM_ALERT_ENABLED = os.getenv("TELEGRAM_ALERT_ENABLED", "1").strip().lower() in ("1", "true", "yes", "on")
+TELEGRAM_DISCLAIMER_ENABLED = os.getenv("TELEGRAM_DISCLAIMER_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on")
 
 # ====== Telegram helpers (NUEVO) ======
 _TG_CLIENT = None
@@ -785,8 +786,9 @@ def main():
                                         if origen:
                                             lineas.append(origen)
                                         lineas.append(texto_formateado)
-                                        lineas.append("")
-                                        lineas.append(TELEGRAM_DISCLAIMER)
+                                        if TELEGRAM_DISCLAIMER_ENABLED:
+                                            lineas.append("")
+                                            lineas.append(TELEGRAM_DISCLAIMER)
                                         payload = "\n".join(lineas)
                                         tg_send(payload)
                                     else:
