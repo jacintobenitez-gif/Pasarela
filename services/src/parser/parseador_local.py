@@ -219,6 +219,7 @@ TG_API_HASH = os.getenv("TELEGRAM_API_HASH", "").strip()
 TG_PHONE    = os.getenv("TELEGRAM_PHONE", "").strip()
 TG_SESSION  = os.getenv("TELEGRAM_SESSION", "telethon_session").strip()
 TG_TARGETS  = os.getenv("TELEGRAM_TARGETS", "").strip()  # ej: @JBMSignals|https://t.me/JBMSignals|JBMSignals
+TELEGRAM_ALERT_ENABLED = os.getenv("TELEGRAM_ALERT_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on")
 
 # ====== Telegram helpers (NUEVO) ======
 _TG_CLIENT = None
@@ -769,8 +770,27 @@ def main():
                             # --- NUEVO: enviar texto formateado a Telegram (SOLO si existe) ---
                             try:
                                 if texto_formateado and TG_API_ID and TG_API_HASH and TG_PHONE and TG_TARGETS:
-                                    payload = f"{texto_formateado}\n\n{TELEGRAM_DISCLAIMER}"
-                                    tg_send(payload)
+                                    if TELEGRAM_ALERT_ENABLED:
+                                        origen = data.get('channel_username')
+                                        if origen:
+                                            origen = origen.strip()
+                                            if origen and not origen.startswith("@"):
+                                                origen = f"@{origen.lstrip('@')}"
+                                        else:
+                                            alt = data.get('channel') or data.get('channel_title')
+                                            if alt:
+                                                alt_clean = alt.strip().replace(" ", "")
+                                                origen = f"@{alt_clean}" if alt_clean else None
+                                        lineas = []
+                                        if origen:
+                                            lineas.append(origen)
+                                        lineas.append(texto_formateado)
+                                        lineas.append("")
+                                        lineas.append(TELEGRAM_DISCLAIMER)
+                                        payload = "\n".join(lineas)
+                                        tg_send(payload)
+                                    else:
+                                        print("[TG] Envío omitido (TELEGRAM_ALERT_ENABLED=0).")
                             except Exception as e:
                                 print(f"[TG] Aviso envío: {e}")
 

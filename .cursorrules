@@ -1,0 +1,20 @@
+# Reglas para el asistente de IA en este proyecto
+
+## REGLA CRÍTICA: NO MODIFICAR CÓDIGO SIN PERMISO EXPLÍCITO
+- NUNCA modificar, editar, cambiar o alterar ningún archivo de código sin el permiso explícito del usuario
+- NUNCA usar herramientas de edición (search_replace, write, etc.) sin que el usuario lo solicite explícitamente
+- SIEMPRE preguntar antes de hacer cualquier cambio en el código
+- Si el usuario pregunta "¿por qué no funciona X?", solo analizar y explicar, NO modificar código
+- Si el usuario pregunta "¿cómo se hace Y?", explicar primero y esperar confirmación antes de implementar
+
+## Comportamiento esperado
+- Analizar código y explicar problemas: ✅ PERMITIDO
+- Leer archivos para entender el código: ✅ PERMITIDO  
+- Buscar en el código: ✅ PERMITIDO
+- Ejecutar comandos de prueba (si el usuario lo pide): ✅ PERMITIDO
+- Modificar cualquier archivo: ❌ PROHIBIDO sin permiso explícito
+
+## Excepciones
+- Solo modificar código cuando el usuario diga explícitamente: "cambia esto", "modifica", "arregla", "implementa", etc.
+- Si hay duda, SIEMPRE preguntar primero: "¿Quieres que modifique el código para...?"
+
