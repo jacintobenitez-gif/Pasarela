@@ -221,7 +221,7 @@ def _extract_tps(text: str) -> List[float]:
     for v in tps:
         if v not in seen:
             seen.add(v); out.append(v)
-    # PARCHE: eliminar ordinales (1,2,3,...) cuando existan precios “reales”
+    # PARCHE: eliminar ordinales (1,2,3,...) cuando existan precios "reales"
     out = _clean_tp_ordinals(out)
     return out
 
@@ -312,19 +312,24 @@ def _detect_action(text: str, direction: Optional[str]) -> Optional[str]:
       Si no hay limit/stop explícito, BUY o SELL (si hay dirección).
     """
     low = text.lower()
-    # Regla MT4 estricta: sólo 6 tipos válidos. Evitar que "stop" (de stop loss) dispare STOP.
-    # Detectamos explícitos de tipo de orden por pares "BUY/SELL + LIMIT/STOP".
+
+    def _has(pattern: str) -> bool:
+        return re.search(pattern, low, flags=re.IGNORECASE) is not None
+
+    # Detectar expresiones explícitas aunque la dirección aún no esté resuelta
+    if _has(r"\bbuy\s+limit\b") or _has(r"\blimit\s+buy\b"):
+        return "BUY LIMIT"
+    if _has(r"\bbuy\s+stop\b") or _has(r"\bstop\s+buy\b"):
+        return "BUY STOP"
+    if _has(r"\bsell\s+limit\b") or _has(r"\blimit\s+sell\b"):
+        return "SELL LIMIT"
+    if _has(r"\bsell\s+stop\b") or _has(r"\bstop\s+sell\b"):
+        return "SELL STOP"
+
+    # Si no hay palabras compuestas, usar la dirección genérica
     if direction == "BUY":
-        if re.search(r"\bbuy\s+limit\b", low):
-            return "BUY LIMIT"
-        if re.search(r"\bbuy\s+stop\b", low):
-            return "BUY STOP"
         return "BUY"
     if direction == "SELL":
-        if re.search(r"\bsell\s+limit\b", low):
-            return "SELL LIMIT"
-        if re.search(r"\bsell\s+stop\b", low):
-            return "SELL STOP"
         return "SELL"
     return None
 
@@ -543,11 +548,12 @@ def formatear_senal(senal: Dict[str, Any]) -> Optional[str]:
     Formatea una señal con score=10 al template:
     COMPRAR/VENDER - ACTIVO - PRECIO|(LO-HI)
 
-    Nivel SL: X
+    SL: X
 
-    Nivel TP1: X
-    Nivel TP2: X
-    Nivel TP3: X
+    TP1: X
+    TP2: X
+    TP3: X
+    (y todos los TPs adicionales disponibles)
     """
     if not senal or int(senal.get("score", 0)) != 10:
         return None
@@ -581,22 +587,18 @@ def formatear_senal(senal: Dict[str, Any]) -> Optional[str]:
         return None
 
     tps = senal.get("tp") or []
-    tp_fmt = [_fmt_num(tp) for tp in tps[:3]]
-    # Completar hasta 3 líneas con None -> "-"
-    while len(tp_fmt) < 3:
-        tp_fmt.append(None)
-
+    tp_fmt = [_fmt_num(tp) for tp in tps]
+    # Mostrar todos los TPs disponibles
     lineas = [
         f"{accion_txt} - {activo} - {entrada_txt}",
         "",
-        f"Nivel SL: {sl_txt}",
+        f"SL: {sl_txt}",
         "",
     ]
+    # Mostrar todos los TPs disponibles (sin límite)
     for idx, val in enumerate(tp_fmt, start=1):
         if val:
-            lineas.append(f"Nivel TP{idx}: {val}")
-        else:
-            lineas.append(f"Nivel TP{idx}: -")
+            lineas.append(f"TP{idx}: {val}")
 
     return "\n".join(lineas)
 
