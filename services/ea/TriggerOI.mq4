@@ -1,6 +1,11 @@
 //+------------------------------------------------------------------+
-//| Panel de Botones Comprar / Vender / Cerrar (solo interfaz)      |
-//| Pasos 1, 2 y 3 (sin lógica de trading)                          |
+//|                                                   TriggerOI4.mq4 |
+//|                                  Copyright 2025, MetaQuotes Ltd. |
+//|                                             https://www.mql5.com |
+//+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| Panel de Botones Comprar / Vender / Cerrar (solo interfaz)       |
+//| Pasos 1, 2 y 3 (sin lógica de trading)                           |
 //+------------------------------------------------------------------+
 #property strict
 #include "..\\Libraries\\LibreriaTriggerOI.mq4"
@@ -148,15 +153,13 @@ void OnTick()
    { 
       Traza1 = "";
       if (Log == 1) Trazas(" LecturaMercado-->...", Traza1);      
-      if (Log == 1) Trazas(" LecturaMercado--> Direccion Actual: " + IntegerToString(DireccionActual), Traza1);      
       if (Log == 1) Traza2 = "";
       
-      int Direccion = CambioDireccion();
+      int Direccion = LecturaOnda();
+      if (Log == 1) Trazas(" LecturaMercado--> Direccion: " + IntegerToString(Direccion), Traza1);      
 
       if (Direccion == DIR_LARGOS)
-      {
-         Traza0 = "";
-
+      {               
          if (Comprar() > 0)
          {
             LecturaMercado = false;
@@ -164,9 +167,7 @@ void OnTick()
          }
       }
       else if (Direccion == DIR_CORTOS)
-      {
-         Traza0 = "";
-
+      {                  
          if (Vender() > 0)
          {
             LecturaMercado = false;
@@ -186,7 +187,6 @@ void OnTick()
          SalidaMercado = false; 
          // Meter datos de pipos ganados y ganancias obtenidas...        
          if (Log == 1) Trazas(" Datos resumen de la operación: ", Traza3); 
-
       }
    }
    
@@ -235,50 +235,210 @@ void OnChartEvent(const int id,
 }
 //+------------------------------------------------------------------+
 
-int CambioDireccion()
+int LecturaOnda()
 {
-   int iCambioDireccion = DIR_NODIR;
+   int iLecturaOnda = DIR_NODIR;
 
-   ZigZagFractal(Par, PERIOD_M15, 4, 5, 3, 2);
+   int dir_M15 = GetDireccionPorWPR(Par, PERIOD_M15, 4, 8, 16);
+   if (Log == 1) Trazas(" LecturaMercado-->WPR´s 15: " + IntegerToString(dir_M15), Traza1);
+
+   int dir_M5  = GetDireccionPorWPR(Par, PERIOD_M5, 12, 24, 48);
+   if (Log == 1) Trazas(" LecturaMercado-->WPR´s 5: " + IntegerToString(dir_M5), Traza1);
+
+   int dir_M1  = GetDireccionPorWPR(Par, PERIOD_M1, 60, 120, 240);
+   if (Log == 1) Trazas(" LecturaMercado-->WPR´s 1: " + IntegerToString(dir_M1), Traza1);
    
-   if (ZZAux[0] > ZZAux[1])
+   int stoM15 = GetDireccionPorEstocasticosM15();
+   
+   int BB_EMA_M30_H1 = GetDireccionBB_EMA_M30_H1();
+   if (Log == 1) Trazas(" LecturaMercado-->BB_EMA_M30_H1: " + IntegerToString(BB_EMA_M30_H1), Traza1);
+
+   if ((dir_M15 == DIR_LARGOS) && (dir_M5 == DIR_LARGOS) 
+   && (dir_M1 == DIR_LARGOS) && (stoM15 == DIR_LARGOS) && (BB_EMA_M30_H1 == DIR_LARGOS))
    {
-      DireccionNueva = DIR_LARGOS;
-      
-      if (DireccionActual != DireccionNueva)
+      if (Log == 1) Trazas(" LecturaMercado-->WPR´s Largos", Traza1);
+
+      if (GetOnda(DIR_LARGOS, PERIOD_M15, 8, 5, 3, 4, R0M15, R1M15, R2M15, R3M15) == DIR_LARGOS)
       {
-         DireccionActual = DireccionNueva;
-         if (Log == 1) Trazas(" Cambio Direccion --> Direccion Actual: Largos", Traza1);      
-         iCambioDireccion = DIR_LARGOS;
+//         double R0M5 = 0;
+//         double R1M5 = 0;
+//         double R2M5 = 0;
+//         double R3M5 = 0;
+
+//         if (GetOnda(DIR_LARGOS, PERIOD_M5, 24, 5, 9, 4, R0M5, R1M5, R2M5, R3M5) == DIR_LARGOS)     
+//         {
+//            double R0M1 = 0;
+//            double R1M1 = 0;
+//            double R2M1 = 0;
+//            double R3M1 = 0;
+
+//            if (GetOnda(DIR_LARGOS, PERIOD_M1, 120, 5, 45, 4, R0M1, R1M1, R2M1, R3M1) == DIR_LARGOS)        
+//            {
+//               if ((R0M15 == R0M5) && (R0M5 == R0M1))
+//               {
+//                  if ((R1M15 == R1M5) && (R1M5 == R1M1))
+//                  {
+//                     if ((R2M15 == R2M5) && (R2M5 == R2M1))
+//                     {
+                        ZigZagFractal(Par, PERIOD_M15, 16, 5, 6, 2);
+                        
+                        double N0 = ZZAux[0];
+                        double N1 = ZZAux[1];
+                        
+                        if (Log == 1) Trazas(" LecturaOnda--> N0:" + DoubleToString(N0) + 
+                        " N1:" + DoubleToString(N1) + " R3: " + DoubleToString(R3M15), Traza1);     
+                        
+                        if ((N0 == R3M15) || (N1 == R3M15))
+                        {
+                           ZigZagFractal(Par, PERIOD_M30, 8, 5, 3, 1);
+                           
+                           double FractalM30 = ZZAux[0];
+                           double DirFractalM30 = ZZAuxDirFractal[0];
+
+                           if (Log == 1) Trazas(" LecturaOnda--> FractalM30: " + DoubleToString(FractalM30) + 
+                           " DirFractalM30: " + DoubleToString(DirFractalM30), Traza1);     
+
+                           ZigZagFractal(Par, PERIOD_H1, 4, 5, 3, 1);
+
+                           double FractalH1 = ZZAux[0];
+                           double DirFractalH1 = ZZAuxDirFractal[0];
+
+                           if (Log == 1) Trazas(" LecturaOnda--> FractalH1: " + DoubleToString(FractalH1) + 
+                           " DirFractalH1: " + DoubleToString(DirFractalH1), Traza1);     
+                           
+                           if ((FractalH1 == FractalM30) && (DirFractalM30 == DirFractalH1)
+                           && (DirFractalM30 == FRACTAL_DN))
+                           {
+                              if (Log == 1) Trazas(" LecturaOnda--> Ondas Largos ALINEADAS", Traza1);     
+                              iLecturaOnda = DIR_LARGOS; 
+                           }
+//                        }  
+//                     }                  
+//                  }
+//               }
+//            }
+         }
+      }
+   }
+   else if ((dir_M15 == DIR_CORTOS) && (dir_M5 == DIR_CORTOS) 
+   && (dir_M1 == DIR_CORTOS) && (stoM15 == DIR_CORTOS) && (BB_EMA_M30_H1 == DIR_CORTOS))
+   {
+      if (Log == 1) Trazas(" LecturaMercado-->WPR´s Cortos", Traza1); 
+      
+      if (GetOnda(DIR_CORTOS, PERIOD_M15, 8, 5, 3, 4, R0M15, R1M15, R2M15, R3M15) == DIR_CORTOS) 
+      {
+//         double R0M5 = 0;
+//         double R1M5 = 0;
+//         double R2M5 = 0;
+//         double R3M5 = 0;
+
+//         if (GetOnda(DIR_CORTOS, PERIOD_M5, 24, 5, 9, 4, R0M5, R1M5, R2M5, R3M5) == DIR_CORTOS)
+//         {
+//            double R0M1 = 0;
+//            double R1M1 = 0;
+//            double R2M1 = 0;
+//            double R3M1 = 0;
+            
+//            if (GetOnda(DIR_CORTOS, PERIOD_M1, 120, 5, 45, 4, R0M1, R1M1, R2M1, R3M1) == DIR_CORTOS) 
+//            {
+//               if ((R0M15 == R0M5) && (R0M5 == R0M1))
+//               {
+//                  if ((R1M15 == R1M5) && (R1M5 == R1M1))
+//                  {
+//                     if ((R2M15 == R2M5) && (R2M5 == R2M1))
+//                     {
+                        ZigZagFractal(Par, PERIOD_M15, 16, 5, 6, 2);
+                        
+                        double N0 = ZZAux[0];
+                        double N1 = ZZAux[1];
+
+                        if (Log == 1) Trazas(" LecturaOnda--> N0:" + DoubleToString(N0) + 
+                        " N1:" + DoubleToString(N1) + " R3: " + DoubleToString(R3M15), Traza1);     
+                        
+                        if ((N0 == R3M15) || (N1 == R3M15))
+                        {
+                           ZigZagFractal(Par, PERIOD_M30, 8, 5, 3, 1);
+                           
+                           double FractalM30 = ZZAux[0];
+                           double DirFractalM30 = ZZAuxDirFractal[0];
+
+                           if (Log == 1) Trazas(" LecturaOnda--> FractalM30: " + DoubleToString(FractalM30) + 
+                           " DirFractalM30: " + DoubleToString(DirFractalM30), Traza1);     
+
+                           ZigZagFractal(Par, PERIOD_H1, 4, 5, 3, 1);
+
+                           double FractalH1 = ZZAux[0];
+                           double DirFractalH1 = ZZAuxDirFractal[0];
+
+                           if (Log == 1) Trazas(" LecturaOnda--> FractalH1: " + DoubleToString(FractalH1) + 
+                           " DirFractalH1: " + DoubleToString(DirFractalH1), Traza1);     
+                           
+                           if ((FractalH1 == FractalM30) && (DirFractalM30 == DirFractalH1)
+                           && (DirFractalM30 == FRACTAL_UP))
+                           {
+                              if (Log == 1) Trazas(" LecturaOnda--> Ondas Cortos ALINEADAS", Traza1);     
+                              iLecturaOnda = DIR_CORTOS;
+                           } 
+                        }  
+//                     }                  
+//                  }
+//               }
+//            }
+//         } 
       } 
-      
-      if (!PrimeraIteracion)
-      {
-         PrimeraIteracion = true;
-         iCambioDireccion = DIR_NODIR;
-         if (Log == 1) Trazas(" Cambio Direccion --> Activada Primera Iteracion", Traza0);      
-      }
    }
-   else if (ZZAux[0] < ZZAux[1])
-   {
-      DireccionNueva = DIR_CORTOS;
 
-      if (DireccionActual != DireccionNueva)
-      {
-         DireccionActual = DireccionNueva;
-         iCambioDireccion = DIR_CORTOS;
-         if (Log == 1) Trazas(" Cambio Direccion --> Direccion Actual: Cortos", Traza1);      
-      }    
+   return(iLecturaOnda);  
+}
 
-      if (!PrimeraIteracion)
-      {
-         PrimeraIteracion = true;
-         iCambioDireccion = DIR_NODIR;
-         if (Log == 1) Trazas(" Cambio Direccion --> Activada Primera Iteracion", Traza0);      
-      }
-   }
+int GetOnda(int Direccion, ENUM_TIMEFRAMES iPeriodo, int Depth, 
+int Deviation, int Backstep, int Iteraciones, double &R0, double &R1, double &R2, double &R3)
+{
+   int iGetOnda = DIR_NODIR;
    
-   return(iCambioDireccion);
+   ZigZagFractal(Par, iPeriodo, Depth, Deviation, Backstep, Iteraciones);
+   
+   if (Direccion == DIR_CORTOS)
+   {      
+      if (Log == 1) Trazas(" GetOnda -->Periodo: " + IntegerToString(iPeriodo) + " (" + IntegerToString(Depth) + ") ", Traza1);
+      if (Log == 1) Trazas(" 0: " + DoubleToString(ZZAux[0]) + " 1: " + DoubleToString(ZZAuxFractal[1])
+      + " 2: " + DoubleToString(ZZAuxFractal[2]) + " 3: " + DoubleToString(ZZAuxFractal[3]), Traza1);                     
+      
+      if ((ZZAux[0] < ZZAuxFractal[1]) && (ZZAuxFractal[1] > ZZAuxFractal[2])
+      && (ZZAuxFractal[2] < ZZAuxFractal[3]) && (ZZAuxFractal[3] > ZZAuxFractal[1])
+      && (ZZAuxFractal[3] > ZZAux[0]))
+      {
+         iGetOnda = DIR_CORTOS; 
+         if (Log == 1) Trazas(" GetOnda -->(" + IntegerToString(Depth) + ") Onda3: Cortos", Traza1); 
+         R0 = ZZAux[0];
+         R1 = ZZAuxFractal[1];
+         R2 = ZZAuxFractal[2];
+         R3 = ZZAuxFractal[3];         
+      }         
+   }
+   else if (Direccion == DIR_LARGOS)
+   {      
+      if (Log == 1) Trazas(" GetOnda -->Periodo: " + IntegerToString(iPeriodo) + " (" + IntegerToString(Depth) + ") ", Traza1);
+      if (Log == 1) Trazas(" 0: " + DoubleToString(ZZAux[0]) + " 1: " + DoubleToString(ZZAuxFractal[1])
+      + " 2: " + DoubleToString(ZZAuxFractal[2]) + " 3: " + DoubleToString(ZZAuxFractal[3]), Traza1);                     
+      
+      
+      if ((ZZAux[0] > ZZAuxFractal[1]) && (ZZAuxFractal[1] < ZZAuxFractal[2])
+      && (ZZAuxFractal[2] > ZZAuxFractal[3]) && (ZZAuxFractal[3] < ZZAuxFractal[1])
+      && (ZZAuxFractal[3] < ZZAux[0]))
+      {
+         iGetOnda = DIR_LARGOS; 
+         if (Log == 1) Trazas(" GetOnda -->(" + IntegerToString(Depth) + ") Onda3: Largos", Traza1);                     
+         R0 = ZZAux[0];
+         R1 = ZZAuxFractal[1];
+         R2 = ZZAuxFractal[2];
+         R3 = ZZAuxFractal[3];
+      }
+   }
+
+   if (Log == 1) Trazas(" Salida GetOnda-->" + IntegerToString(iGetOnda), Traza1);       
+   
+   return (iGetOnda);
 }
 
 int Comprar()
@@ -288,7 +448,7 @@ int Comprar()
    commentSalida = Par;
    if (Log == 1) Trazas(" CommentSalida:" + commentSalida + " Nº Operaciones: " + IntegerToString(numerooperaciones) + " MiniLotes: " + DoubleToStr(miniLotes)  , Traza2);
    
-   OperacionesAbiertas = ExecMarket(DIR_LARGOS, numerooperaciones, miniLotes, commentSalida);
+   OperacionesAbiertas = ExecMarket(DIR_LARGOS, numerooperaciones, miniLotes, commentSalida, R1M15);
    if (Log == 1) Trazas(" Operaciones Abiertas: " + IntegerToString(OperacionesAbiertas), Traza2);
 
    //Ejecutas orden en el mercado
@@ -315,7 +475,7 @@ int Vender()
    commentSalida = Par;
    if (Log == 1) Trazas(" CommentSalida:" + commentSalida + " Nº Operaciones: " + IntegerToString(numerooperaciones) + " MiniLotes: " + DoubleToStr(miniLotes), Traza2);
    
-   OperacionesAbiertas = ExecMarket(DIR_CORTOS, numerooperaciones, miniLotes, commentSalida);
+   OperacionesAbiertas = ExecMarket(DIR_CORTOS, numerooperaciones, miniLotes, commentSalida, R1M15);
    if (Log == 1) Trazas(" Operaciones Abiertas: " + IntegerToString(OperacionesAbiertas), Traza2);
 
    //Ejecutas orden en el mercado

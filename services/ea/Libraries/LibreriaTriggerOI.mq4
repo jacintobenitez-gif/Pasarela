@@ -13,6 +13,11 @@
 double version = 1.00;
 string Par = Symbol();
 int Digitos = (int)MarketInfo(Par, MODE_DIGITS);
+double R0M15 = 0;
+double R1M15 = 0;
+double R2M15 = 0;
+double R3M15 = 0;
+
 
 //Direcciones
 int DIR_NODIR  = 0;
@@ -37,6 +42,7 @@ string commentSalida = "";
 int    numerooperaciones = 0; 
 double miniLotes = 0;
 int OperacionesAbiertas = 0;
+int TakeProfit = 3;
 
 //ZigZag
 double   ZZAux[];
@@ -116,6 +122,119 @@ int Backstep, int iIteraciones)
    }
 }
 
+//--------------------------------------------------------------
+// Dirección por alineación de 3 Williams %R
+// Devuelve:
+//   DIR_CORTOS  si los 3 %R < -50
+//   DIR_LARGOS  si los 3 %R > -50
+//   0           en cualquier otro caso (neutro / mixto / sin datos)
+//--------------------------------------------------------------
+int GetDireccionPorWPR(string symbol,
+                       int timeframe,
+                       int period1,
+                       int period2,
+                       int period3,
+                       int shift = 0)
+{
+   double w1 = iWPR(symbol, timeframe, period1, shift);
+   double w2 = iWPR(symbol, timeframe, period2, shift);
+   double w3 = iWPR(symbol, timeframe, period3, shift);
+
+   // Si aún no hay datos suficientes, devolvemos neutro
+   if(w1 == EMPTY_VALUE || w2 == EMPTY_VALUE || w3 == EMPTY_VALUE)
+      return 0;
+
+   // Todos por debajo de -50 → DIR_CORTOS
+   if(w1 < -50.0 && w2 < -50.0 && w3 < -50.0)
+      return DIR_CORTOS;
+
+   // Todos por encima de -50 → DIR_LARGOS
+   if(w1 > -50.0 && w2 > -50.0 && w3 > -50.0)
+      return DIR_LARGOS;
+
+   // Mezcla → sin dirección clara
+   return 0;
+}
+
+int GetDireccionBB_EMA_M30_H1()
+{
+   int iGetDireccionBB_EMA_M30_H1 = DIR_NODIR;
+
+   double ema5_curr = iMA(Par, PERIOD_M30, 5, 0, MODE_EMA, PRICE_CLOSE, 0);
+   double bbM30_curr = iBands(Par, PERIOD_M30, 8, 2.0, 0, PRICE_CLOSE, MODE_MAIN, 0);
+   
+   bool largos_M30 = (ema5_curr > bbM30_curr);
+   bool cortos_M30 = (ema5_curr < bbM30_curr);
+
+   double ema2_curr = iMA(Par, PERIOD_H1, 2, 0, MODE_EMA, PRICE_CLOSE, 0);
+   double bbH1_curr = iBands(Par, PERIOD_H1, 4, 2.0, 0, PRICE_CLOSE, MODE_MAIN, 0);
+
+   // Cruce alcista en H1: antes por debajo/igual, ahora por encima
+   bool largos_H1 = (ema2_curr > bbH1_curr);
+   bool cortos_H1 = (ema2_curr < bbH1_curr);
+   
+   if ((largos_M30) && (largos_H1))
+   {
+      iGetDireccionBB_EMA_M30_H1 = DIR_LARGOS;   
+   }
+   else if ((cortos_M30) && (cortos_H1))
+   {
+      iGetDireccionBB_EMA_M30_H1 = DIR_CORTOS;      
+   }
+   
+   return(iGetDireccionBB_EMA_M30_H1);
+         
+}
+//-------------------------------------------------------------
+// Devuelve la dirección según dos estocásticos en M15:
+//  - Estocástico (8,3,3)
+//  - Estocástico (16,3,3)
+// Regla:
+//   Si ambos tienen MAIN > 50 y MAIN > SIGNAL  -> DIR_LARGOS
+//   En cualquier otro caso                      -> DIR_CORTOS
+//
+// Nota: se usa la vela cerrada (shift = 1)
+//       Se asume que DIR_LARGOS y DIR_CORTOS están definidos
+//-------------------------------------------------------------
+int GetDireccionPorEstocasticosM15()
+{
+   int tf       = PERIOD_M15;
+   int slowing  = 3;
+   int dPeriod  = 3;
+   int method   = MODE_SMA;
+   int price    = 0;      // Low/High (modo estándar del oscilador estocástico)
+   int shift    = 0;      // vela cerrada
+
+   // Estocástico (8,3,3)
+   int kPeriod1 = 8;
+   double main1   = iStochastic(Par, tf, kPeriod1, slowing, dPeriod,
+                                method, price, MODE_MAIN, shift);
+   double signal1 = iStochastic(Par, tf, kPeriod1, slowing, dPeriod,
+                                method, price, MODE_SIGNAL, shift);
+
+   // Estocástico (16,3,3)
+   int kPeriod2 = 16;
+   double main2   = iStochastic(Par, tf, kPeriod2, slowing, dPeriod,
+                                method, price, MODE_MAIN, shift);
+   double signal2 = iStochastic(Par, tf, kPeriod2, slowing, dPeriod,
+                                method, price, MODE_SIGNAL, shift);
+
+   bool condicionesLargos =
+      (main1 > 50.0 && main2 > 50.0 &&
+       main1 > signal1 && main2 > signal2);
+
+   bool condicionesCortos =
+      (main1 < 50.0 && main2 < 50.0 &&
+       main1 < signal1 && main2 < signal2);
+
+   if(condicionesLargos)
+      return DIR_LARGOS;
+   else if (condicionesCortos)
+      return DIR_CORTOS;
+   else 
+      return DIR_NODIR;
+}
+
 
 //+------------------------------------------------------------------+
 //+------------------------------------------------------------------+
@@ -169,7 +288,7 @@ void LotsForMarginPercent(double percent, int &norders, double &minlotes)
 //+------------------------------------------------------------------+
 //                      FUNCIONES ACCESO A MERCADO
 
-int ExecMarket(int dir, int maxOps, double lots, string comment = "")
+int ExecMarket(int dir, int maxOps, double lots, string comment = "", double sl = 0)
 {
 
    RefreshRates();
@@ -181,7 +300,7 @@ int ExecMarket(int dir, int maxOps, double lots, string comment = "")
    for(k=0; k<maxOps; k++)
    {
       RefreshRates();
-      double price = 0, tp = 0, sl = 0;
+      double price = 0, tp = 0;
       int    type = 0;
       int magic = 31071974;
 
@@ -196,7 +315,7 @@ int ExecMarket(int dir, int maxOps, double lots, string comment = "")
          price = NormalizeDouble(Bid, Digitos);
       }
 
-      CalcularTPySL(Par, type, price, 2, 0, tp, sl);
+      CalcularTP(Par, type, price, TakeProfit, tp);
       if (Log == 1) Trazas("TP:" + DoubleToStr(tp) + " SL: " + DoubleToStr(sl), Traza2); 
 
       // Enviar orden
@@ -262,6 +381,34 @@ void CalcularTPySL(string symbol, int orderType, double entryPrice,
    }
    // Si llega otro tipo de orden, tp y sl se quedan en 0.0
 }
+
+void CalcularTP(string symbol, int orderType, double entryPrice, 
+                   double profitPips, double &tp)
+{
+   double pipSize = GetPipSize(symbol);
+
+   // Ajuste especial para ORO:
+   // Si el símbolo contiene "XAU", interpretamos profitPips/lossPips como dólares (1.0)
+   if(StringFind(symbol, "XAU") != -1)
+      pipSize = 1.0;
+
+   int digits = (int)MarketInfo(symbol, MODE_DIGITS);
+   tp = 0.0;
+
+   if(orderType == OP_BUY)
+   {
+      // TP solo si profitPips > 0
+      if(profitPips > 0)
+         tp = NormalizeDouble(entryPrice + profitPips * pipSize, digits);
+   }
+   else if(orderType == OP_SELL)
+   {
+      if(profitPips > 0)
+         tp = NormalizeDouble(entryPrice - profitPips * pipSize, digits);
+   }
+   // Si llega otro tipo de orden, tp y sl se quedan en 0.0
+}
+
 
 //---------------------------------------------
 // Devuelve el tamaño de 1 pip para el símbolo
