@@ -63,7 +63,7 @@ _BROADCAST_SERVER = None
 
 CSV_FIELDS = [
     'oid','ts_mt4_queue','symbol','order_type',
-    'entry_price','sl','tp','comment','estado_operacion'
+    'entry_price','sl','tp1','tp2','tp3','tp4','comment','estado_operacion','channel'
 ]
 
 def _should_run_broadcast() -> bool:
@@ -605,10 +605,63 @@ def _build_fila_desde_resultado(resultados, evento):
         dir_ = (mejor.get("direccion") or "").upper()
         if dir_ in ("BUY", "SELL"):
             accion = dir_
-    entry_price = mejor.get("entrada_resuelta")
-    sl = mejor.get("sl")
-    tp_list = mejor.get("tp") or []
-    tp = tp_list[0] if tp_list else None
+    
+    # Caso especial: PARTIAL CLOSE - solo rellenar order_type y channel
+    es_partial_close = (accion == "PARTIAL CLOSE")
+    
+    # Caso especial: CLOSEALL - solo rellenar order_type y channel
+    es_closeall = (accion == "CLOSEALL")
+    
+    # Caso especial: BREAKEVEN - solo rellenar symbol, order_type y channel
+    es_breakeven = (accion == "BREAKEVEN")
+    
+    # Caso especial: MOVETO y STOPLOSSESTO
+    es_moveto = (accion == "MOVETO")
+    es_stoplossesto = (accion == "STOPLOSSESTO")
+    
+    if es_partial_close:
+        # PARTIAL CLOSE: solo order_type y channel, resto vacío
+        symbol = None
+        entry_price = None
+        sl = None
+        tp1 = None
+        tp2 = None
+        tp3 = None
+        tp4 = None
+    elif es_closeall:
+        # CLOSEALL: solo order_type y channel, resto vacío
+        symbol = None
+        entry_price = None
+        sl = None
+        tp1 = None
+        tp2 = None
+        tp3 = None
+        tp4 = None
+    elif es_breakeven:
+        entry_price = None
+        sl = None
+        tp1 = None
+        tp2 = None
+        tp3 = None
+        tp4 = None
+    elif es_moveto or es_stoplossesto:
+        # MOVETO/STOPLOSSESTO: solo necesita sl (el nuevo valor), no requiere entry_price ni TPs
+        entry_price = None  # No se requiere entrada
+        sl = mejor.get("sl")  # El nuevo valor del SL
+        tp1 = None
+        tp2 = None
+        tp3 = None
+        tp4 = None
+    else:
+        entry_price = mejor.get("entrada_resuelta")
+        sl = mejor.get("sl")
+        tp_list = mejor.get("tp") or []
+        # Extraer hasta 4 TPs y asignarlos a tp1, tp2, tp3, tp4
+        tp1 = tp_list[0] if len(tp_list) > 0 else None
+        tp2 = tp_list[1] if len(tp_list) > 1 else None
+        tp3 = tp_list[2] if len(tp_list) > 2 else None
+        tp4 = tp_list[3] if len(tp_list) > 3 else None
+    
     score = int(mejor.get("score", 0))
 
     # OID basado en fecha y msg_id si viene
@@ -620,17 +673,35 @@ def _build_fila_desde_resultado(resultados, evento):
         seq_raw = int(hhmmss) % 100000
     oid = f"{today}-{str(seq_raw).zfill(5)}"
 
+    # Extraer nombre del canal de Telegram (prioriza channel_username, luego channel)
+    channel_name = None
+    if isinstance(evento, dict):
+        channel_name = evento.get('channel_username') or evento.get('channel') or None
+
+    # Mapear acciones a los nuevos textos para order_type
+    order_type_map = {
+        'MOVETO': 'SL A',
+        'STOPLOSSESTO': 'VARIOS SL A',
+        'PARTIAL CLOSE': 'PARCIAL',
+        'CLOSEALL': 'CERRAR'
+    }
+    order_type = order_type_map.get(accion, accion)
+    
     fila = {
         'oid': oid,
         'ts_mt4_queue': datetime.now(timezone.utc).isoformat(),
         'symbol': symbol,
-        'order_type': accion,
+        'order_type': order_type,
         'entry_price': entry_price,
         'sl': sl,
-        'tp': tp,
+        'tp1': tp1,
+        'tp2': tp2,
+        'tp3': tp3,
+        'tp4': tp4,
         'comment': oid,
         'estado_operacion': 0,
-        'score': score
+        'score': score,
+        'channel': channel_name
     }
     return fila
 
@@ -730,8 +801,9 @@ def main():
                         score = fila['score']
                         oid   = fila['oid']
 
+                        tps_str = ",".join([str(fila[f'tp{i}']) for i in range(1, 5) if fila.get(f'tp{i}') is not None])
                         print(f"[parseador] análisis→ msg_id={mid} score={score} sym={fila['symbol']} "
-                              f"type={fila['order_type']} entry={fila['entry_price']} sl={fila['sl']} tp={fila['tp']} oid={oid}")
+                              f"type={fila['order_type']} entry={fila['entry_price']} sl={fila['sl']} tp=[{tps_str}] oid={oid}")
 
                         # 0) Guardar SIEMPRE en Trazas_Unica los básicos (no operativos)
                         basico = _build_basico_desde_evento(data, score, oid, texto_formateado)
@@ -770,7 +842,7 @@ def main():
 
                             # --- NUEVO: enviar texto formateado a Telegram (SOLO si existe) ---
                             try:
-                                if texto_formateado and TG_API_ID and TG_API_HASH and TG_PHONE and TG_TARGETS:
+                                if TG_API_ID and TG_API_HASH and TG_PHONE and TG_TARGETS:
                                     if TELEGRAM_ALERT_ENABLED:
                                         origen = data.get('channel_username')
                                         if origen:
@@ -782,15 +854,61 @@ def main():
                                             if alt:
                                                 alt_clean = alt.strip().replace(" ", "")
                                                 origen = f"@{alt_clean}" if alt_clean else None
-                                        lineas = []
-                                        if origen:
-                                            lineas.append(origen)
-                                        lineas.append(texto_formateado)
-                                        if TELEGRAM_DISCLAIMER_ENABLED:
-                                            lineas.append("")
-                                            lineas.append(TELEGRAM_DISCLAIMER)
-                                        payload = "\n".join(lineas)
-                                        tg_send(payload)
+                                        
+                                        # Caso especial: PARCIAL (PARTIAL CLOSE) - mensaje simple
+                                        if fila.get('order_type') == 'PARCIAL':
+                                            if origen:
+                                                payload = f"{origen} PARCIAL"
+                                            else:
+                                                payload = "PARCIAL"
+                                        # Caso especial: CERRAR (CLOSEALL) - mensaje simple
+                                        elif fila.get('order_type') == 'CERRAR':
+                                            if origen:
+                                                payload = f"{origen} CERRAR"
+                                            else:
+                                                payload = "CERRAR"
+                                        # Caso especial: BREAKEVEN - mensaje simple
+                                        elif fila.get('order_type') == 'BREAKEVEN':
+                                            if origen:
+                                                payload = f"{origen} Breakeven"
+                                            else:
+                                                payload = "Breakeven"
+                                        # Caso especial: VARIOS SL A (STOPLOSSESTO) - mensaje con valor numérico
+                                        elif fila.get('order_type') == 'VARIOS SL A':
+                                            sl_valor = fila.get('sl')
+                                            if sl_valor is not None:
+                                                if origen:
+                                                    payload = f"{origen} VARIOS SL A {sl_valor}"
+                                                else:
+                                                    payload = f"VARIOS SL A {sl_valor}"
+                                            else:
+                                                payload = None
+                                        # Caso especial: SL A (MOVETO) - mensaje con valor numérico
+                                        elif fila.get('order_type') == 'SL A':
+                                            sl_valor = fila.get('sl')
+                                            if sl_valor is not None:
+                                                if origen:
+                                                    payload = f"{origen} SL A {sl_valor}"
+                                                else:
+                                                    payload = f"SL A {sl_valor}"
+                                            else:
+                                                payload = None
+                                        else:
+                                            # Caso normal: usar texto formateado
+                                            if texto_formateado:
+                                                lineas = []
+                                                if origen:
+                                                    lineas.append(origen)
+                                                lineas.append(texto_formateado)
+                                                if TELEGRAM_DISCLAIMER_ENABLED:
+                                                    lineas.append("")
+                                                    lineas.append(TELEGRAM_DISCLAIMER)
+                                                payload = "\n".join(lineas)
+                                            else:
+                                                payload = None
+                                        
+                                        if payload:
+                                            tg_send(payload)
                                     else:
                                         print("[TG] Envío omitido (TELEGRAM_ALERT_ENABLED=0).")
                             except Exception as e:
