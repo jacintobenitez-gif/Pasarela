@@ -45,6 +45,12 @@ PARSE_STREAM  = os.getenv("REDIS_STREAM", "pasarela:parse")
 DEDUP_TTL_SEC = int(os.getenv("DEDUP_TTL", str(15*24*3600)))  # 15 días
 STREAM_MAXLEN = int(os.getenv("STREAM_MAXLEN", "200000"))
 
+# ========= FILTRO DE MENSAJES ANTIGUOS =========
+# Ignorar mensajes más antiguos que X minutos desde el inicio del listener
+# Esto evita que el sistema se atasque procesando mensajes históricos
+MESSAGE_AGE_LIMIT_MINUTES = int(os.getenv("MESSAGE_AGE_LIMIT_MINUTES", "5"))  # Por defecto: 5 minutos
+_LISTENER_START_TIME = None
+
 # ========= HELPERS =========
 def utc_iso(dt):
     if dt is None:
@@ -240,6 +246,7 @@ async def main():
     
     log(f"Publicando mensajes de {len(CHANNEL_IDS)} canales en Redis Stream: {PARSE_STREAM}")
     log(f"CSV={'ON' if WRITE_CSV else 'OFF'}. Ctrl+C para salir.")
+    log(f"[FILTRO] Ignorando mensajes más antiguos de {MESSAGE_AGE_LIMIT_MINUTES} minutos para evitar atasco")
 
     # Hot-reload: recargar configuración periódicamente
     async def periodic_refresh():
@@ -254,6 +261,16 @@ async def main():
     # ==== NEW MESSAGE ====
     @client.on(events.NewMessage())
     async def on_new(event: events.NewMessage.Event):
+        # Filtrar mensajes antiguos para evitar atasco
+        msg = event.message
+        if msg.date:
+            msg_time = msg.date.replace(tzinfo=timezone.utc) if msg.date.tzinfo is None else msg.date
+            now = datetime.now(timezone.utc)
+            age_minutes = (now - msg_time).total_seconds() / 60
+            if age_minutes > MESSAGE_AGE_LIMIT_MINUTES:
+                # Mensaje demasiado antiguo, ignorar silenciosamente
+                return
+        
         chat = await event.get_chat()
         # id POSITIVO del canal
         ch_id = int(getattr(chat, "id", 0)) if isinstance(chat, Channel) else int(event.chat_id or 0)
@@ -269,7 +286,6 @@ async def main():
         if username in EXCLUDE_USERNAMES or title in EXCLUDE_TITLES:
             return
 
-        msg  = event.message
         text = (msg.message or "").replace("\r", " ").strip()
         if not text:
             return
@@ -298,6 +314,17 @@ async def main():
     # ==== MESSAGE EDITED ====
     @client.on(events.MessageEdited())
     async def on_edit(event: events.MessageEdited.Event):
+        # Filtrar mensajes antiguos para evitar atasco
+        msg = event.message
+        edit_time = msg.edit_date or msg.date
+        if edit_time:
+            msg_time = edit_time.replace(tzinfo=timezone.utc) if edit_time.tzinfo is None else edit_time
+            now = datetime.now(timezone.utc)
+            age_minutes = (now - msg_time).total_seconds() / 60
+            if age_minutes > MESSAGE_AGE_LIMIT_MINUTES:
+                # Mensaje demasiado antiguo, ignorar silenciosamente
+                return
+        
         chat = await event.get_chat()
         ch_id = int(getattr(chat, "id", 0)) if isinstance(chat, Channel) else int(event.chat_id or 0)
         if not isinstance(chat, Channel) or getattr(chat, "left", False):
@@ -312,7 +339,6 @@ async def main():
         if username in EXCLUDE_USERNAMES or title in EXCLUDE_TITLES:
             return
 
-        msg  = event.message
         text = (msg.message or "").replace("\r", " ").strip()
         if not text:
             return
