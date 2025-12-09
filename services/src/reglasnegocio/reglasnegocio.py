@@ -888,11 +888,21 @@ def formatear_senal(senal: Dict[str, Any]) -> Optional[str]:
     TP2: X
     TP3: X
     (y todos los TPs adicionales disponibles)
+    
+    Para acciones especiales (BREAKEVEN, MOVETO, STOPLOSSESTO, PARTIAL CLOSE, CLOSEALL),
+    devuelve solo el nombre de la acción detectada.
     """
     if not senal or int(senal.get("score", 0)) != 10:
         return None
 
-    accion_txt = _accion_a_etiqueta(senal.get("accion"))
+    accion = senal.get("accion")
+    
+    # Casos especiales: devolver solo el nombre de la acción
+    acciones_especiales = ["BREAKEVEN", "MOVETO", "STOPLOSSESTO", "PARTIAL CLOSE", "CLOSEALL"]
+    if accion in acciones_especiales:
+        return accion
+
+    accion_txt = _accion_a_etiqueta(accion)
     if not accion_txt:
         return None
 
