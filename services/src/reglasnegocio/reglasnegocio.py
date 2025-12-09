@@ -172,6 +172,11 @@ def _find_assets(text: str) -> List[str]:
 SL_WORDS = r"(?:\bsl\b|\bs/l\b|\bstop\s*loss\b|\bstop\b)"
 TP_WORDS = r"(?:\btp\d*\b|\btargets?\b|\btarget\b|\btake\s*profit\b|\bobjetivos?\b|\bmeta\b|\btake\b|\balvo\b)"
 
+# Palabras clave para detectar breakeven
+# Nota: BE solo en mayúsculas para evitar falsos positivos con el verbo "to be"
+# El patrón (?<![a-z])(?:BE|B\.E\.)(?![a-z]) solo debe coincidir con BE en mayúsculas, no con "be" minúsculas
+BREAKEVEN_WORDS = r"(?:\bbreakeven\b|\bbreak-even\b|\bbreak\s+even\b|(?<![a-z])(?:BE|B\.E\.)(?![a-z])|\bpunto\s+de\s+equilibrio\b|\bpunto\s+equilibrio\b|\bsin\s+pérdidas\b|\bsin\s+perdidas\b|\bcero\s+pérdidas\b|\bcero\s+perdidas\b)"
+
 BUY_WORDS  = r"(?:\bbuy\b|\blong\b|\bgo\s*long\b|\bbullish\b|\bcomprar\b|\bcompra\b)"
 SELL_WORDS = r"(?:\bsell\b|\bshort\b|\bgo\s*short\b|\bbearish\b|\bvender\b|\bventa\b)"
 
@@ -186,6 +191,294 @@ def _has_sl_keyword(text: str) -> bool:
 
 def _has_tp_keyword(text: str) -> bool:
     return re.search(TP_WORDS, text, flags=re.IGNORECASE) is not None
+
+def _has_closeall_keyword(text: str) -> bool:
+    """
+    Detecta si el texto contiene referencias a cerrar todas las posiciones.
+    Nota: "close" y "cerrar" solas NO se detectan (necesitan contexto).
+    "closed" en pasado SÍ se detecta como CLOSEALL.
+    """
+    text_lower = text.lower()
+    
+    # Patrones en inglés (excluyendo "close" sola)
+    patterns_en = [
+        r'\bclose\s+all\b',
+        r'\bclose\s+everything\b',
+        r'\bclose\s+now\b',
+        r'\bclosed\b',  # Pasado - sí se detecta
+        r'\bflatten\s+all\b',
+        r'\bflatten\b',
+    ]
+    
+    # Patrones en español (excluyendo "cerrar" sola)
+    patterns_es = [
+        r'\bcerrar\s+todo\b',
+        r'\bcerrar\s+ya\b',
+        r'\bcerrar\s+ahora\b',
+        r'\banulamos\b',
+        r'\banular\b',
+        r'\banulen\b',
+        r'\bcierra\s+todo\b',
+        r'\bcierren\s+todo\b',
+        r'\bcerrad\s+todo\b',
+        r'\bcerrar\s+todas\b',
+        r'\bcierra\s+todas\b',
+        r'\bcerrar\s+posiciones\b',
+        r'\bcierra\s+posiciones\b',
+        r'\bcerrad\b',  # Imperativo plural
+        r'\bcierren\b',  # Imperativo plural
+        r'\bcerrar\s+todas\s+las\s+posiciones\b',
+        r'\bcierra\s+todas\s+las\s+posiciones\b',
+        r'\bcerrar\s+[oó]rdenes\b',
+        r'\bcierra\s+[oó]rdenes\b',
+        r'\bcerrar\s+todas\s+las\s+[oó]rdenes\b',
+        r'\bcierra\s+todas\s+las\s+[oó]rdenes\b',
+        r'\bcerrar\s+operaciones\b',
+        r'\bcierra\s+operaciones\b',
+        r'\bsalir\s+de\s+todo\b',
+        r'\bsalida\s+total\b',
+    ]
+    
+    # Verificar patrones en inglés
+    for pattern in patterns_en:
+        if re.search(pattern, text_lower, flags=re.IGNORECASE):
+            return True
+    
+    # Verificar patrones en español
+    for pattern in patterns_es:
+        if re.search(pattern, text_lower, flags=re.IGNORECASE):
+            return True
+    
+    return False
+
+def _has_partial_close_keyword(text: str) -> bool:
+    """
+    Detecta si el texto contiene referencias a cierre parcial.
+    """
+    text_lower = text.lower()
+    
+    # Patrones en español
+    patterns_es = [
+        r'\basegurando\s+algo\s+de\s+profits\b',
+        r'\basegurando\s+profits\b',
+        r'\basegurando\b',
+        r'\basegurar\b',
+        r'\basegurad\b',
+        r'\baseguren\s+partial\b',
+        r'\bpartials\b',
+        r'\bparcial\b',
+        r'\bparciales\b',
+        r'\bmitad\b',
+        r'\bcerrad\s+parcial\b',
+        r'\bcerrad\s+parciales\b',
+        r'\bcerrad\s+mitad\b',
+        r'\basegurar\s+parciales\b',
+        r'\basegurando\s+parciales\b',
+        r'\baseguren\s+parciales\b',
+        r'\bcerrar\s+parcial\b',
+        r'\bcerrar\s+parciales\b',
+        r'\bcerrar\s+mitad\b',
+        r'\breducir\s+posicion\b',
+        r'\breducir\s+posici[oó]n\b',
+        r'\breducid\b',
+        r'\breducimos\b',
+    ]
+    
+    # Patrones en inglés
+    patterns_en = [
+        r'\bpartial\s+close\b',
+        r'\bpartial\s+tp\b',
+        r'\bscale\s+out\b',
+        r'\btrim\b',
+        r'\breduce\s+position\b',
+        r'\btake\s+partial\b',
+        r'\btake\s+partials\b',
+        r'\bpartial\b',  # Solo "partial" como palabra completa
+    ]
+    
+    # Verificar patrones en español
+    for pattern in patterns_es:
+        if re.search(pattern, text_lower, flags=re.IGNORECASE):
+            return True
+    
+    # Verificar patrones en inglés
+    for pattern in patterns_en:
+        if re.search(pattern, text_lower, flags=re.IGNORECASE):
+            return True
+    
+    return False
+
+def _has_breakeven_keyword(text: str) -> bool:
+    """
+    Detecta si el texto contiene referencias a breakeven.
+    Incluye patrones de "mover SL a entrada/be/breakeven".
+    Nota: "be" en minúsculas se descarta para evitar falsos positivos con el verbo "to be".
+    """
+    # Primero verificar el regex básico de breakeven, pero con cuidado con "BE" vs "be"
+    # Buscar primero "BE" en mayúsculas específicamente (sin IGNORECASE para esta parte)
+    be_match = re.search(r'(?<![a-z])(?:BE|B\.E\.)(?![a-z])', text)
+    if be_match:
+        # Verificar que realmente sea "BE" en mayúsculas, no "be" minúsculas
+        matched_text = text[be_match.start():be_match.end()]
+        if matched_text.upper() == matched_text:  # Solo si está en mayúsculas
+            return True
+    
+    # Buscar otras palabras de breakeven con IGNORECASE (breakeven, break-even, etc.)
+    other_patterns = r"(?:\bbreakeven\b|\bbreak-even\b|\bbreak\s+even\b|\bpunto\s+de\s+equilibrio\b|\bpunto\s+equilibrio\b|\bsin\s+pérdidas\b|\bsin\s+perdidas\b|\bcero\s+pérdidas\b|\bcero\s+perdidas\b)"
+    if re.search(other_patterns, text, flags=re.IGNORECASE):
+        return True
+    
+    # Patrones adicionales para detectar "mover SL a entrada/be/breakeven"
+    # Español - "mover sl a entrada/be"
+    patterns_es = [
+        r'mover\s+(?:el\s+)?(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+a\s+(?:entrada|be\b|breakeven|break\s+even)',
+        r'mover\s+(?:el\s+)?(?:stop|stop\s*loss|stop-loss)\s+a\s+(?:entrada|be\b|breakeven|break\s+even)',
+        r'(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+a\s+(?:entrada|be\b|breakeven|break\s+even)',
+        r'(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+al\s+punto\s+de\s+entrada',
+        r'(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+en\s+entrada',
+        r'poner\s+(?:el\s+)?(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+(?:a|en)\s+(?:entrada|be\b|breakeven|break\s+even)',
+        r'llevar\s+(?:el\s+)?(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+a\s+(?:entrada|be\b|breakeven|break\s+even)',
+        r'llevar\s+(?:el\s+)?(?:stop|stop\s*loss|stop-loss)\s+a\s+(?:entrada|be\b|breakeven|break\s+even)',
+        r'subir\s+(?:el\s+)?(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+a\s+(?:entrada|be\b|breakeven|break\s+even)',
+        r'bajar\s+(?:el\s+)?(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+a\s+(?:entrada|be\b|breakeven|break\s+even)',
+        r'pasa\s+(?:el\s+)?(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+a\s+(?:entrada|be\b|breakeven|break\s+even)',
+        r'ajustar\s+(?:el\s+)?(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+a\s+(?:entrada|be\b|breakeven|break\s+even)',
+        r'ajusta\s+(?:el\s+)?(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+a\s+(?:entrada|be\b|breakeven|break\s+even)',
+        r'(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+a\s+(?:cero|0)',
+        r'(?:stop|stop\s*loss|stop-loss)\s+a\s+(?:cero|0)',
+        r'mover\s+a\s+be\b',
+        r'ir\s+a\s+be\b',
+        r'al\s+be\b',
+    ]
+    
+    # Inglés - "move sl to entry/be/breakeven"
+    patterns_en = [
+        r'move\s+(?:my\s+|our\s+|your\s+|all\s+)?(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+to\s+(?:entry|be\b|breakeven|break\s+even)',
+        r'moved\s+(?:my\s+|our\s+|your\s+|all\s+)?(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+to\s+(?:entry|be\b|breakeven|break\s+even)',
+        r'moving\s+(?:my\s+|our\s+|your\s+|all\s+)?(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+to\s+(?:entry|be\b|breakeven|break\s+even)',
+        r'set\s+(?:my\s+|our\s+|your\s+|all\s+)?(?:SL|stop\s*loss|stoploss)(?:es)?\s+to\s+(?:entry|be\b|breakeven|break\s+even)',
+        r'put\s+(?:my\s+|our\s+|your\s+|all\s+)?(?:SL|stop\s*loss|stoploss)(?:es)?\s+(?:to|at)\s+(?:entry|be\b|breakeven|break\s+even)',
+        r'adjust\s+(?:my\s+|our\s+|your\s+|all\s+)?(?:SL|stop\s*loss|stoploss)(?:es)?\s+to\s+(?:entry|be\b|breakeven|break\s+even)',
+        r'(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+to\s+(?:entry|be\b|breakeven|break\s+even)',
+        r'(?:stop|stop\s*loss|stop-loss)\s+to\s+(?:entry|be\b|breakeven|break\s+even)',
+        r'move\s+to\s+(?:breakeven|break\s+even|be\b)',
+        r'go\s+(?:to\s+)?(?:breakeven|break\s+even|be\b)',
+        r'set\s+to\s+(?:breakeven|break\s+even|be\b)',
+        r'(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+to\s+(?:zero|0)',
+        r'(?:stop|stop\s*loss|stop-loss)\s+to\s+(?:zero|0)',
+        r'to\s+be\b',
+        r'move\s+to\s+be\b',
+        r'set\s+to\s+be\b',
+    ]
+    
+    # Verificar patrones en español e inglés
+    all_patterns = patterns_es + patterns_en
+    
+    for pattern in all_patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            # Si el patrón contiene "be", verificar que no sea solo "be" en minúsculas sin contexto
+            # Los patrones ya incluyen contexto ("a be", "to be", etc.), pero verificamos por seguridad
+            if r'\bbe\b' in pattern:
+                matched_text = match.group(0)
+                # Buscar "be" en el texto original en la posición del match
+                match_start = match.start()
+                match_end = match.end()
+                # Buscar "be" dentro del match
+                be_in_match = re.search(r'\bbe\b', text[match_start:match_end], flags=re.IGNORECASE)
+                if be_in_match:
+                    be_pos_in_text = match_start + be_in_match.start()
+                    be_text = text[be_pos_in_text:be_pos_in_text+2]
+                    # Si es "be" en minúsculas, verificar que tenga contexto antes
+                    if be_text == 'be':  # Solo minúsculas
+                        context_start = max(0, be_pos_in_text - 15)
+                        context = text[context_start:be_pos_in_text + 2].lower()
+                        # Verificar que tenga contexto de movimiento (a be, to be, al be, etc.)
+                        if any(ctx in context for ctx in ['a be', 'to be', 'al be', 'move to be', 'set to be', 'go to be', 'sl to be', 'stop to be']):
+                            return True
+                        # Si no tiene contexto, podría ser el verbo "to be", descartar
+                        continue
+                    else:
+                        # Es "BE" en mayúsculas o tiene contexto, aceptar
+                        return True
+                else:
+                    # No hay "be" en el match, aceptar
+                    return True
+            else:
+                # Patrón sin "be", aceptar directamente
+                return True
+    
+    return False
+
+def _detect_move_sl(texto: str) -> Optional[Dict[str, Any]]:
+    """
+    Detecta frases que expresan "mover stop loss" y extrae el número.
+    Retorna None si no encuentra, o dict con 'accion': 'MOVETO' o 'STOPLOSSESTO', 'sl': valor_numerico
+    Si contiene "stoplosses" (plural), retorna 'STOPLOSSESTO', sino 'MOVETO'
+    """
+    # NOTA: Ya no excluimos breakeven/entrada aquí porque ahora se detectan como BREAKEVEN
+    # antes de llegar a esta función. Solo verificamos exclusiones muy específicas.
+    EXCLUDE_WORDS = [
+        'back to entry',  # Caso muy específico que no queremos detectar
+    ]
+    
+    # Verificar exclusiones específicas primero
+    texto_lower = texto.lower()
+    if any(ex in texto_lower for ex in EXCLUDE_WORDS):
+        return None
+    
+    # Si contiene breakeven/entrada, no intentar detectar MOVETO (ya será detectado como BREAKEVEN antes)
+    # Esto evita conflictos si llegara aquí por alguna razón
+    if _has_breakeven_keyword(texto):
+        return None
+    
+    # Detectar si contiene "stoplosses" (plural) - case insensitive
+    contiene_stoplosses = re.search(r'\bstoplosses\b', texto_lower) is not None
+    
+    PATTERNS = [
+        # Patrones en inglés
+        r'move\s+(?:my\s+|our\s+|your\s+|all\s+)?(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+to\s+([0-9]+(?:\.[0-9]+)?)',
+        r'moved\s+(?:my\s+|our\s+|your\s+|all\s+)?(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+to\s+([0-9]+(?:\.[0-9]+)?)',
+        r'moving\s+(?:my\s+|our\s+|your\s+|all\s+)?(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+to\s+([0-9]+(?:\.[0-9]+)?)',
+        r'shift(?:ing)?\s+(?:my\s+|our\s+|your\s+|all\s+|the\s+)?(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+to\s+([0-9]+(?:\.[0-9]+)?)',
+        r'temporarily\s+shift(?:ing)?\s+(?:my\s+|our\s+|your\s+|all\s+|the\s+)?(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+to\s+([0-9]+(?:\.[0-9]+)?)',
+        r'(?:^|\s)(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+to\s+([0-9]+(?:\.[0-9]+)?)',
+        r'move\s+to\s+([0-9]+(?:\.[0-9]+)?)\s+(?:SL|stop\s*loss|stoploss)',
+        r'set\s+(?:my\s+|our\s+|your\s+|all\s+)?(?:SL|stop\s*loss|stoploss)(?:es)?\s+to\s+([0-9]+(?:\.[0-9]+)?)',
+        r'update\s+(?:my\s+|our\s+|your\s+|all\s+)?(?:SL|stop\s*loss|stoploss)(?:es)?\s+to\s+([0-9]+(?:\.[0-9]+)?)',
+        r'change\s+(?:my\s+|our\s+|your\s+|all\s+)?(?:SL|stop\s*loss|stoploss)(?:es)?\s+to\s+([0-9]+(?:\.[0-9]+)?)',
+        r'adjust\s+(?:my\s+|our\s+|your\s+|all\s+)?(?:SL|stop\s*loss|stoploss)(?:es)?\s+to\s+([0-9]+(?:\.[0-9]+)?)',
+        r'put\s+(?:my\s+|our\s+|your\s+|all\s+)?(?:SL|stop\s*loss|stoploss)(?:es)?\s+to\s+([0-9]+(?:\.[0-9]+)?)',
+        # Patrones en español - "poner" / "poner el"
+        r'poner\s+(?:el\s+)?(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+a\s+([0-9]+(?:\.[0-9]+)?)',
+        r'poner\s+(?:el\s+)?(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+en\s+([0-9]+(?:\.[0-9]+)?)',
+        # Patrones en español - "llevar"
+        r'llevar\s+(?:el\s+)?(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+a\s+([0-9]+(?:\.[0-9]+)?)',
+        r'llevar\s+(?:el\s+)?(?:stop|stop\s*loss|stop-loss)\s+a\s+([0-9]+(?:\.[0-9]+)?)',
+        # Patrones en español - "subir" / "bajar"
+        r'subir\s+(?:el\s+)?(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+a\s+([0-9]+(?:\.[0-9]+)?)',
+        r'bajar\s+(?:el\s+)?(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+a\s+([0-9]+(?:\.[0-9]+)?)',
+        # Patrones en español - "pasa"
+        r'pasa\s+(?:el\s+)?(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+a\s+([0-9]+(?:\.[0-9]+)?)',
+        # Patrones en español - "mover" (ya tenemos en inglés, pero añadimos variantes en español)
+        r'mover\s+(?:el\s+)?(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+a\s+([0-9]+(?:\.[0-9]+)?)',
+        r'mover\s+(?:el\s+)?(?:stop|stop\s*loss|stop-loss)\s+a\s+([0-9]+(?:\.[0-9]+)?)',
+        # Patrones en español - "ajustar" (ya tenemos "adjust", pero añadimos variante en español)
+        r'ajustar\s+(?:el\s+)?(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+a\s+([0-9]+(?:\.[0-9]+)?)',
+        r'ajusta\s+(?:el\s+)?(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+a\s+([0-9]+(?:\.[0-9]+)?)',
+    ]
+    
+    for pattern in PATTERNS:
+        match = re.search(pattern, texto, re.IGNORECASE)
+        if match:
+            numero = float(match.group(1))
+            # Determinar acción según si contiene "stoplosses"
+            accion = 'STOPLOSSESTO' if contiene_stoplosses else 'MOVETO'
+            return {
+                'accion': accion,
+                'sl': numero
+            }
+    return None
 
 # =========================
 # Extracción SL / TP / Entrada
@@ -442,9 +735,40 @@ def _decidir_score(data: Dict[str, Any]) -> int:
     """
     10 si: clasificacion=Válido AND accion definida AND entrada utilizable AND SL AND ≥1 TP
            AND la coherencia direccional no es False.
+    Caso especial PARTIAL CLOSE: score=10 si accion=PARTIAL CLOSE (requisitos más flexibles).
+    Caso especial CLOSEALL: score=10 si accion=CLOSEALL (requisitos más flexibles).
+    Caso especial BREAKEVEN: score=10 si accion=BREAKEVEN (requisitos más flexibles).
+    Caso especial MOVETO: score=10 si accion=MOVETO AND sl definido (requisitos más flexibles).
+    Caso especial STOPLOSSESTO: score=10 si accion=STOPLOSSESTO AND sl definido (requisitos más flexibles).
     """
     es_valido = (data.get("clasificacion") == "Válido")
     accion = data.get("accion")
+    
+    # Caso especial: PARTIAL CLOSE (prioridad 1)
+    if accion == "PARTIAL CLOSE" and es_valido:
+        return 10  # PARTIAL CLOSE tiene score=10 sin requerir entrada, SL o TP explícitos
+    
+    # Caso especial: CLOSEALL (prioridad 2)
+    if accion == "CLOSEALL" and es_valido:
+        return 10  # CLOSEALL tiene score=10 sin requerir entrada, SL o TP explícitos
+    
+    # Caso especial: BREAKEVEN
+    if accion == "BREAKEVEN" and es_valido:
+        return 10  # Breakeven tiene score=10 sin requerir entrada, SL o TP explícitos
+    
+    # Caso especial: MOVETO
+    if accion == "MOVETO" and es_valido:
+        sl_ok = (data.get("sl") is not None)
+        if sl_ok:
+            return 10  # MOVETO tiene score=10 si tiene SL definido
+    
+    # Caso especial: STOPLOSSESTO
+    if accion == "STOPLOSSESTO" and es_valido:
+        sl_ok = (data.get("sl") is not None)
+        if sl_ok:
+            return 10  # STOPLOSSESTO tiene score=10 si tiene SL definido
+    
+    # Caso normal: requisitos estrictos
     entrada_resuelta = (data.get("entrada_resuelta"))
     sl_ok = (data.get("sl") is not None)
     tp_ok = bool(data.get("tp") or [])
@@ -458,6 +782,16 @@ def _decidir_score(data: Dict[str, Any]) -> int:
 # =========================
 
 def _es_valido(texto: str, activos: List[str]) -> bool:
+    # Caso especial: partial close (no requiere TP explícito, activo puede inferirse del canal)
+    if _has_partial_close_keyword(texto):
+        return True  # PARTIAL CLOSE es válido incluso sin activo explícito o TP
+    # Caso especial: closeall (no requiere TP explícito, activo puede inferirse del canal)
+    if _has_closeall_keyword(texto):
+        return True  # CLOSEALL es válido incluso sin activo explícito o TP
+    # Caso especial: breakeven (no requiere TP explícito, activo puede inferirse del canal)
+    if _has_breakeven_keyword(texto):
+        return True  # Breakeven es válido incluso sin activo explícito o TP
+    # Caso normal: requiere activo + SL + TP
     return bool(activos) and _has_sl_keyword(texto) and _has_tp_keyword(texto)
 
 # >>> ÚNICO CAMBIO DE ESTRUCTURA: devolver escalar para 'precio'
@@ -622,7 +956,78 @@ def clasificar_mensajes(texto: str) -> List[Dict[str, Any]]:
         return [base]
 
     text_search = _normalize_text_for_search(texto)
+    
+    # PRIORIDAD 1: Detectar PARTIAL CLOSE antes que cualquier otro caso
+    es_partial_close = _has_partial_close_keyword(text_search)
+    if es_partial_close:
+        # Construir resultado especial para PARTIAL CLOSE
+        activos = _find_assets(text_search)
+        activo = activos[0] if activos else None
+        
+        out = {
+            "clasificacion": "Válido",
+            "activo": activo or "",
+            "accion": "PARTIAL CLOSE",
+            "direccion": "INDETERMINADA",
+            "entrada": {"tipo": "no_encontrada", "valores": []},
+            "entrada_resuelta": None,  # No se requiere entrada
+            "entrada_fuente": None,
+            "sl": None,  # No se requiere SL
+            "tp": [],  # No se requieren TPs
+            "consistencia_direccion": None,  # No aplica
+        }
+        out["score"] = _decidir_score(out)
+        return [out]
+    
+    # PRIORIDAD 2: Detectar CLOSEALL antes que MOVETO y BREAKEVEN
+    es_closeall = _has_closeall_keyword(text_search)
+    if es_closeall:
+        # Construir resultado especial para CLOSEALL
+        activos = _find_assets(text_search)
+        activo = activos[0] if activos else None
+        
+        out = {
+            "clasificacion": "Válido",
+            "activo": activo or "",
+            "accion": "CLOSEALL",
+            "direccion": "INDETERMINADA",
+            "entrada": {"tipo": "no_encontrada", "valores": []},
+            "entrada_resuelta": None,  # No se requiere entrada
+            "entrada_fuente": None,
+            "sl": None,  # No se requiere SL
+            "tp": [],  # No se requieren TPs
+            "consistencia_direccion": None,  # No aplica
+        }
+        out["score"] = _decidir_score(out)
+        return [out]
+    
+    # PRIORIDAD 3: Detectar MOVETO antes del procesamiento normal
+    moveto_result = _detect_move_sl(texto)
+    if moveto_result:
+        # Construir resultado especial para MOVETO
+        activos = _find_assets(text_search)
+        activo = activos[0] if activos else None
+        
+        out = {
+            "clasificacion": "Válido",
+            "activo": activo or "",
+            "accion": "MOVETO",
+            "direccion": "INDETERMINADA",
+            "entrada": {"tipo": "no_encontrada", "valores": []},
+            "entrada_resuelta": None,  # No se requiere entrada
+            "entrada_fuente": None,
+            "sl": moveto_result['sl'],  # El nuevo valor del SL
+            "tp": [],  # No se requieren TPs
+            "consistencia_direccion": None,  # No aplica
+        }
+        out["score"] = _decidir_score(out)
+        return [out]
+    
     activos = _find_assets(text_search)
+    
+    # Detectar si es mensaje de breakeven
+    es_breakeven = _has_breakeven_keyword(text_search)
+    
     es_val = _es_valido(text_search, activos)
 
     sl = _extract_sl(text_search)
@@ -635,8 +1040,11 @@ def clasificar_mensajes(texto: str) -> List[Dict[str, Any]]:
     entradas_cands = _extract_entry_candidates(text_search)
     entrada_obj = _consolidar_entrada(entradas_cands)
 
-    # Acción específica (depende de la dirección)
-    accion = _detect_action(text_search, dir_exp or dir_imp)
+    # Acción específica: si es breakeven, establecer BREAKEVEN; si no, detectar normalmente
+    if es_breakeven:
+        accion = "BREAKEVEN"
+    else:
+        accion = _detect_action(text_search, dir_exp or dir_imp)
 
     # Resuelve entrada utilizable (precio o rango→precio según acción)
     entrada_resuelta, entrada_fuente = _entrada_utilizable(entrada_obj, accion)
