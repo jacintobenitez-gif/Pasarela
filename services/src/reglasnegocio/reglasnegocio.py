@@ -313,6 +313,7 @@ def _has_breakeven_keyword(text: str) -> bool:
     Detecta si el texto contiene referencias a breakeven.
     Incluye patrones de "mover SL a entrada/be/breakeven".
     Nota: "be" en minúsculas se descarta para evitar falsos positivos con el verbo "to be".
+    Excluye falsos positivos: "TO BE", "BEEN", "BEING", "WILL BE".
     """
     # Primero verificar el regex básico de breakeven, pero con cuidado con "BE" vs "be"
     # Buscar primero "BE" en mayúsculas específicamente (sin IGNORECASE para esta parte)
@@ -321,6 +322,33 @@ def _has_breakeven_keyword(text: str) -> bool:
         # Verificar que realmente sea "BE" en mayúsculas, no "be" minúsculas
         matched_text = text[be_match.start():be_match.end()]
         if matched_text.upper() == matched_text:  # Solo si está en mayúsculas
+            # Verificar contexto para excluir falsos positivos del verbo "to be"
+            start_pos = be_match.start()
+            end_pos = be_match.end()
+            
+            # Contexto antes (hasta 10 caracteres antes)
+            context_before = text[max(0, start_pos - 10):start_pos].lower()
+            # Contexto después (hasta 10 caracteres después, incluyendo el texto inmediatamente después)
+            context_after = text[end_pos:min(len(text), end_pos + 10)]
+            
+            # Excluir casos del verbo "to be"
+            # "TO BE", "to be", "To Be" - verificar si antes hay "to"
+            if re.search(r'\bto\s+be\b', context_before + matched_text.lower() + context_after.lower(), flags=re.IGNORECASE):
+                return False
+            
+            # "BEEN", "been", "Been" - verificar si inmediatamente después de BE hay "EN"
+            if len(context_after) >= 2 and context_after[:2].upper() == "EN":
+                return False
+            
+            # "BEING", "being", "Being" - verificar si inmediatamente después de BE hay "ING"
+            if len(context_after) >= 3 and context_after[:3].upper() == "ING":
+                return False
+            
+            # "WILL BE", "will be", "Will Be" - verificar si antes hay "will"
+            if re.search(r'\bwill\s+be\b', context_before + matched_text.lower() + context_after.lower(), flags=re.IGNORECASE):
+                return False
+            
+            # Si pasó todas las exclusiones, es un BE válido de breakeven
             return True
     
     # Buscar otras palabras de breakeven con IGNORECASE (breakeven, break-even, etc.)
