@@ -52,6 +52,7 @@ CSV_ENABLED   = os.getenv("CSV_ENABLED", "1").strip() in ("1", "true", "yes", "o
 
 # === Socket para EA (archivo compartido) ===
 SOCKET_ENABLED = os.getenv("SOCKET_ENABLED", "true").lower() == "true"
+ACTIVAR_SOCKET = os.getenv("ACTIVAR_SOCKET", "false").lower() in ("1", "true", "yes", "on")  # Flag para activar/desactivar envío por socket
 SOCKET_FILENAME = os.getenv("SOCKET_FILENAME", "socket_msg.txt")
 SOCKET_MODE = os.getenv("SOCKET_MODE", "socket").lower()  # valores: socket | file
 SOCKET_HOST = os.getenv("SOCKET_HOST", "127.0.0.1")
@@ -747,6 +748,7 @@ def main():
     print(f"[parseador] CSV destino = {_csv_path()}")
     print(f"[parseador] BBDD destino = {os.path.abspath(DB_FILE)} | Tabla={TABLE}")
     print(f"[parseador] Redis={REDIS_URL} Stream={REDIS_STREAM} Group={REDIS_GROUP} Consumer={CONSUMER}")
+    print(f"[parseador] ACTIVAR_SOCKET = {ACTIVAR_SOCKET} (envío por socket {'ACTIVADO' if ACTIVAR_SOCKET else 'DESACTIVADO'})")
 
     _ensure_broadcast_alive()
     if not _should_run_broadcast():
@@ -833,12 +835,16 @@ def main():
                             print(f"[parseador] ✅ score=10 → {csv_status} + ts_mt4_queue en BBDD. Campos operativos llegarán por ACK.")
 
                             # --- NUEVO: enviar fila CSV al EA de socket (mismo formato que se escribe en CSV) ---
-                            try:
-                                csv_line = csv_row_to_string(fila)
-                                socket_send_to_mt5(csv_line)
-                                print(f"[parseador] SOCKET OK → fila CSV enviada a EA (oid={oid})")
-                            except Exception as e:
-                                print(f"[parseador][SOCKET][WARN] No se pudo enviar al EA (oid={oid}): {e}")
+                            # Solo enviar si ACTIVAR_SOCKET está activado
+                            if ACTIVAR_SOCKET:
+                                try:
+                                    csv_line = csv_row_to_string(fila)
+                                    socket_send_to_mt5(csv_line)
+                                    print(f"[parseador] SOCKET OK → fila CSV enviada a EA (oid={oid})")
+                                except Exception as e:
+                                    print(f"[parseador][SOCKET][WARN] No se pudo enviar al EA (oid={oid}): {e}")
+                            else:
+                                print(f"[parseador] SOCKET desactivado (ACTIVAR_SOCKET=false) → omitido (oid={oid})")
 
                             # --- NUEVO: enviar texto formateado a Telegram (SOLO si existe) ---
                             try:

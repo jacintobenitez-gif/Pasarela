@@ -47,6 +47,23 @@ def _normalize_number_str(raw: str) -> Optional[float]:
     raw = raw.replace(" ", "")
     if not re.search(r"\d", raw):
         return None
+    
+    # MEJORA: Eliminar puntos finales que son signos de puntuación, no parte del decimal
+    # Ejemplo: "4205.5." -> "4205.5" (el último punto es puntuación)
+    # Pero mantener "4205.5" -> "4205.5" (decimal válido)
+    # Verificar si hay un punto que podría ser decimal antes de eliminar el final
+    # Si el número tiene forma "X.Y." donde Y tiene dígitos, el último punto es puntuación
+    if raw.endswith('.'):
+        # Verificar si hay un punto decimal antes del punto final
+        # Si hay un patrón como "123.45.", el último punto es puntuación
+        # Si es solo "123.", podría ser un entero con punto final de puntuación
+        if re.search(r'\d+\.\d+\.$', raw):
+            # Tiene decimales, el último punto es puntuación
+            raw = raw[:-1]
+        elif re.match(r'^\d+\.$', raw):
+            # Es solo "123.", el punto final es puntuación
+            raw = raw[:-1]
+    
     last_dot = raw.rfind(".")
     last_com = raw.rfind(",")
     if last_dot != -1 and last_com != -1:
@@ -56,8 +73,8 @@ def _normalize_number_str(raw: str) -> Optional[float]:
             raw = raw.replace(".", "").replace(",", ".")
     elif last_com != -1 and last_dot == -1:
         raw = raw.replace(",", ".")
-    # limpia separadores sueltos tipo 1’234
-    raw = re.sub(r"(?<=\d)[’']", "", raw)
+    # limpia separadores sueltos tipo 1'234
+    raw = re.sub(r"(?<=\d)['']", "", raw)
     try:
         return float(raw)
     except ValueError:
@@ -583,7 +600,9 @@ def _extract_entry_candidates(text: str) -> List[Tuple[str, List[float]]]:
         fallback_dir_prices.append(("precio", [val]))
 
     # Rangos con separadores: 3815-3812, 3629 – 3632, etc.
-    for m in re.finditer(r"([+-]?\d[\d .,k]*)\s*"+RANGE_SEPARATORS+r"\s*([+-]?\d[\d .,k]*)", norm, flags=re.IGNORECASE):
+    # MEJORA: El patrón ahora evita capturar puntos finales de puntuación usando lookahead negativo
+    # para detenerse antes de signos de puntuación que no son parte del número
+    for m in re.finditer(r"([+-]?\d[\d .,k]+?)\s*"+RANGE_SEPARATORS+r"\s*([+-]?\d[\d .,k]+?)(?=[\s\.\,\!\?\:\;]|$)", norm, flags=re.IGNORECASE):
         a = _normalize_number_str(m.group(1))
         b = _normalize_number_str(m.group(2))
         if a is not None and b is not None and a != b:
