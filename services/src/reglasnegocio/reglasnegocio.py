@@ -455,6 +455,14 @@ def _has_breakeven_keyword(text: str) -> bool:
     
     return False
 
+def _has_target_open_keyword(text: str) -> bool:
+    """
+    Detecta si el texto indica que el target está abierto/libre.
+    Retorna True si encuentra patrones como "Target: open", "TP open", etc.
+    """
+    pattern = r"(tp\d*|targets?|take\s*profit|objetivos?|meta)\s*[:=\-]?\s*(open|abierto|libre|runner|pendiente|por\s+definir|sin\s+definir|none)"
+    return re.search(pattern, text, flags=re.IGNORECASE) is not None
+
 def _detect_move_sl(texto: str) -> Optional[Dict[str, Any]]:
     """
     Detecta frases que expresan "mover stop loss" y extrae el número.
@@ -694,7 +702,18 @@ def _entrada_utilizable(entrada_obj: Dict[str, Any],
 def _check_consistency(direction: str,
                        usable_entry: Optional[float],
                        sl: Optional[float],
-                       tps: List[float]) -> Optional[bool]:
+                       tps: List[float],
+                       target_open: bool = False) -> Optional[bool]:
+    # Si target está abierto, no evaluamos consistencia de TPs (retornamos None)
+    if target_open:
+        # Solo verificamos que SL esté en el lado correcto respecto a la entrada
+        if direction not in ("BUY", "SELL") or usable_entry is None or sl is None:
+            return None
+        if direction == "BUY":
+            return bool(sl < usable_entry)  # Solo verificar SL < entrada
+        else:
+            return bool(usable_entry < sl)  # Solo verificar entrada < SL
+    
     if direction not in ("BUY", "SELL") or usable_entry is None or sl is None or not tps:
         return None
     if direction == "BUY":
@@ -731,7 +750,7 @@ def _normalizar_escala(direction: str,
     others_idx = list(range(1, len(nums)))
 
     def _accept(e, s, T):
-        c = _check_consistency(direction, e, s, T)
+        c = _check_consistency(direction, e, s, T, False)
         return (c is True)
 
     # caso A: solo la entrada es minoría
@@ -815,6 +834,17 @@ def _decidir_score(data: Dict[str, Any]) -> int:
         if sl_ok:
             return 10  # STOPLOSSESTO tiene score=10 si tiene SL definido
     
+    # Caso especial: TARGET OPEN (para operaciones BUY/SELL con target abierto)
+    if accion in ("BUY", "SELL", "BUY LIMIT", "SELL LIMIT", "BUY STOP", "SELL STOP") and es_valido:
+        entrada_resuelta = (data.get("entrada_resuelta"))
+        sl_ok = (data.get("sl") is not None)
+        target_open = data.get("target_open", False)
+        tps = data.get("tp") or []
+        
+        # Si tiene entrada, SL, y target open explícito (sin TPs numéricos) → score=10
+        if entrada_resuelta is not None and sl_ok and target_open and len(tps) == 0:
+            return 10
+    
     # Caso normal: requisitos estrictos
     entrada_resuelta = (data.get("entrada_resuelta"))
     sl_ok = (data.get("sl") is not None)
@@ -883,7 +913,8 @@ def _build_output(clasificacion: str,
                   entrada_resuelta: Optional[float],
                   entrada_fuente: Optional[str],
                   consistencia: Optional[bool],
-                  observaciones: Optional[str]) -> Dict[str, Any]:
+                  observaciones: Optional[str],
+                  target_open: bool = False) -> Dict[str, Any]:
     out = {
         "clasificacion": clasificacion,
         "activo": (activo or ""),
@@ -894,6 +925,7 @@ def _build_output(clasificacion: str,
         "entrada_fuente": entrada_fuente if entrada_fuente else None,
         "sl": sl if sl is not None else None,   # <- FIX: 'is' en vez de 'es'
         "tp": tps if tps else [],
+        "target_open": target_open,
     }
     if consistencia is not None:
         out["consistencia_direccion"] = bool(consistencia)
@@ -978,7 +1010,8 @@ def formatear_senal(senal: Dict[str, Any]) -> Optional[str]:
         return None
 
     tps = senal.get("tp") or []
-    tp_fmt = [_fmt_num(tp) for tp in tps]
+    target_open = senal.get("target_open", False)
+    
     # Mostrar todos los TPs disponibles
     lineas = [
         f"{accion_txt} - {activo} - {entrada_txt}",
@@ -986,10 +1019,16 @@ def formatear_senal(senal: Dict[str, Any]) -> Optional[str]:
         f"SL: {sl_txt}",
         "",
     ]
-    # Mostrar todos los TPs disponibles (sin límite)
-    for idx, val in enumerate(tp_fmt, start=1):
-        if val:
-            lineas.append(f"TP{idx}: {val}")
+    
+    # Si target está abierto, mostrar "TP: Open"
+    if target_open:
+        lineas.append("TP: Open")
+    else:
+        # Mostrar todos los TPs disponibles (sin límite)
+        tp_fmt = [_fmt_num(tp) for tp in tps]
+        for idx, val in enumerate(tp_fmt, start=1):
+            if val:
+                lineas.append(f"TP{idx}: {val}")
 
     return "\n".join(lineas)
 
@@ -1007,7 +1046,7 @@ def clasificar_mensajes(texto: str) -> List[Dict[str, Any]]:
         base = _build_output(
             "Ruido", None, None, "INDETERMINADA",
             {"tipo": "no_encontrada", "valores": []},
-            None, [], None, None, None, "Mensaje vacío"
+            None, [], None, None, None, "Mensaje vacío", False
         )
         base["score"] = _decidir_score(base)
         return [base]
@@ -1032,6 +1071,7 @@ def clasificar_mensajes(texto: str) -> List[Dict[str, Any]]:
             "sl": None,  # No se requiere SL
             "tp": [],  # No se requieren TPs
             "consistencia_direccion": None,  # No aplica
+            "target_open": False,
         }
         out["score"] = _decidir_score(out)
         return [out]
@@ -1054,6 +1094,7 @@ def clasificar_mensajes(texto: str) -> List[Dict[str, Any]]:
             "sl": None,  # No se requiere SL
             "tp": [],  # No se requieren TPs
             "consistencia_direccion": None,  # No aplica
+            "target_open": False,
         }
         out["score"] = _decidir_score(out)
         return [out]
@@ -1076,6 +1117,7 @@ def clasificar_mensajes(texto: str) -> List[Dict[str, Any]]:
             "sl": moveto_result['sl'],  # El nuevo valor del SL
             "tp": [],  # No se requieren TPs
             "consistencia_direccion": None,  # No aplica
+            "target_open": False,
         }
         out["score"] = _decidir_score(out)
         return [out]
@@ -1089,6 +1131,9 @@ def clasificar_mensajes(texto: str) -> List[Dict[str, Any]]:
 
     sl = _extract_sl(text_search)
     tps = _extract_tps(text_search)
+    
+    # Detectar si hay "Target: open" explícito
+    tiene_target_open = _has_target_open_keyword(text_search) and len(tps) == 0
 
     dir_exp = _explicit_direction(text_search)
     dir_imp = _implicit_direction(sl, tps)
@@ -1110,10 +1155,14 @@ def clasificar_mensajes(texto: str) -> List[Dict[str, Any]]:
     entrada_resuelta, sl, tps, _nota_escala = _normalizar_escala(direccion, entrada_resuelta, sl, tps)
 
     # === PARCHE: filtrar TPs por lado y exigir TP1 correcto ===
-    tps, _tp1_ok = _filtrar_tps_y_validar_tp1(direccion, entrada_resuelta, tps)
+    # Si target está abierto, no validamos TP1
+    if not tiene_target_open:
+        tps, _tp1_ok = _filtrar_tps_y_validar_tp1(direccion, entrada_resuelta, tps)
+    else:
+        _tp1_ok = None  # No aplica cuando target está abierto
 
     # Consistencia con entrada utilizable (si se puede evaluar)
-    consistencia = _check_consistency(direccion, entrada_resuelta, sl, tps)
+    consistencia = _check_consistency(direccion, entrada_resuelta, sl, tps, tiene_target_open)
 
     # Si TP1 no es válido, la señal no es válida (score=0)
     if _tp1_ok is False:
@@ -1137,14 +1186,14 @@ def clasificar_mensajes(texto: str) -> List[Dict[str, Any]]:
     salidas: List[Dict[str, Any]] = []
     if not es_val:
         base = _build_output("Ruido", activos[0] if activos else None, accion, direccion,
-                             entrada_obj, sl, tps, entrada_resuelta, entrada_fuente, consistencia, observaciones)
+                             entrada_obj, sl, tps, entrada_resuelta, entrada_fuente, consistencia, observaciones, tiene_target_open)
         base["score"] = _decidir_score(base)
         return [base]
 
     # Es Válido: una salida por activo
     for act in (activos or [None]):
         base = _build_output("Válido", act, accion, direccion,
-                             entrada_obj, sl, tps, entrada_resuelta, entrada_fuente, consistencia, observaciones)
+                             entrada_obj, sl, tps, entrada_resuelta, entrada_fuente, consistencia, observaciones, tiene_target_open)
         base["score"] = _decidir_score(base)
         salidas.append(base)
 

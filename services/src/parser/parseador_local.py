@@ -657,11 +657,20 @@ def _build_fila_desde_resultado(resultados, evento):
         entry_price = mejor.get("entrada_resuelta")
         sl = mejor.get("sl")
         tp_list = mejor.get("tp") or []
-        # Extraer hasta 4 TPs y asignarlos a tp1, tp2, tp3, tp4
-        tp1 = tp_list[0] if len(tp_list) > 0 else None
-        tp2 = tp_list[1] if len(tp_list) > 1 else None
-        tp3 = tp_list[2] if len(tp_list) > 2 else None
-        tp4 = tp_list[3] if len(tp_list) > 3 else None
+        target_open = mejor.get("target_open", False)
+        
+        # Si target está abierto y no hay TPs, poner "OPEN" en tp1
+        if target_open and len(tp_list) == 0:
+            tp1 = "OPEN"
+            tp2 = None
+            tp3 = None
+            tp4 = None
+        else:
+            # Extraer hasta 4 TPs y asignarlos a tp1, tp2, tp3, tp4
+            tp1 = tp_list[0] if len(tp_list) > 0 else None
+            tp2 = tp_list[1] if len(tp_list) > 1 else None
+            tp3 = tp_list[2] if len(tp_list) > 2 else None
+            tp4 = tp_list[3] if len(tp_list) > 3 else None
     
     score = int(mejor.get("score", 0))
 
