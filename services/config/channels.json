@@ -8,13 +8,6 @@
       "include_linked": false
     },
     {
-      "id": 3158133432,
-      "title": "JBFXTradingVision",
-      "username": "JBTRADINGVISION",
-      "enabled": false,
-      "include_linked": false
-    },
-    {
       "id": 2930391849,
       "title": "JB TORO",
       "username": "TOROGOLDV",
@@ -27,11 +20,18 @@
       "username": "INAQUIGOLD",
       "enabled": true,
       "include_linked": false
+    },
+    {
+      "id": 3102625608,
+      "title": "PRUEBAS RUBEN Y JACINTO",
+      "username": "PRUEBASRUBENJACINTO",
+      "enabled": true,
+      "include_linked": false
     }
   ],
   "metadata": {
-    "last_updated": "2025-01-XX",
+    "last_updated": "2025-12-13",
     "version": "1.0",
-    "note": "Solo canales seleccionados: @jbunited, @jbFXTradingVision, @JBTORO, @JB GOLD VIP IÑAKI"
+    "note": "IDs generados automáticamente. Edita 'enabled' para activar/desactivar canales."
   }
 }
