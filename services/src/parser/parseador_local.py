@@ -39,7 +39,9 @@ REDIS_STREAM = os.getenv("REDIS_STREAM", "pasarela:parse")
 REDIS_GROUP  = os.getenv("REDIS_GROUP", "parser")
 CONSUMER     = os.getenv("REDIS_CONSUMER", "local")
 
-DB_FILE      = os.getenv("PASARELA_DB", "pasarela.db")
+# Usar misma ruta por defecto que visor.py para evitar inconsistencias
+_DEFAULT_DB_PATH = r"C:\Pasarela\services\pasarela.db"
+DB_FILE      = os.getenv("PASARELA_DB", _DEFAULT_DB_PATH)
 TABLE        = os.getenv("PASARELA_TABLE", "Trazas_Unica")  # << PARCHE: tabla destino unificada
 
 # === Ruta MT4/Files (lee de .env; fallback a tu ruta fija actual) ===
@@ -729,9 +731,40 @@ def _build_basico_desde_evento(evento, score: int, oid: str, texto_formateado: O
                      or evento.get('channel_id')
                      or evento.get('ch'))
 
+    # Asegurar que ts_utc siempre tenga un valor (formato ISO UTC compatible con visor.py)
+    # visor.py espera formato: "YYYY-MM-DDTHH:MM:SSZ" (sin microsegundos, sin timezone offset)
+    ts_utc_val = None
+    if isinstance(evento, dict):
+        ts_utc_val = evento.get('ts_utc')
+    
+    # Normalizar formato: eliminar microsegundos y timezone offset
+    if ts_utc_val:
+        try:
+            ts_str = str(ts_utc_val).strip()
+            # Eliminar microsegundos si existen (.123456)
+            if '.' in ts_str:
+                ts_str = ts_str.split('.')[0]
+            # Eliminar timezone offset si existe (+00:00 o -05:00)
+            if '+' in ts_str:
+                ts_str = ts_str.split('+')[0]
+            elif len(ts_str) > 10 and ts_str[-6] in '+-':
+                # Formato como "2025-12-14T10:38:02-05:00"
+                ts_str = ts_str[:-6]
+            # Asegurar formato Z al final
+            if not ts_str.endswith('Z'):
+                ts_str += 'Z'
+            ts_utc_val = ts_str
+        except Exception:
+            # Si falla el parsing, usar timestamp actual
+            ts_utc_val = None
+    
+    # Si no hay ts_utc del evento o el formato es incorrecto, usar timestamp actual
+    if not ts_utc_val:
+        ts_utc_val = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    
     return {
         'oid': oid,
-        'ts_utc': (evento.get('ts_utc') if isinstance(evento, dict) else None),
+        'ts_utc': ts_utc_val,
         'ts_redis_ingest': (evento.get('ts_redis_ingest') if isinstance(evento, dict) else None),
         'ch_id': ch_id_val,
         'msg_id': (evento.get('msg_id') if isinstance(evento, dict) else None),
