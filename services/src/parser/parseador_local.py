@@ -535,18 +535,17 @@ def db_update_operativos(oid: str, fila: dict) -> None:
     Actualiza los campos operativos en Trazas_Unica cuando score=10.
     Usa los datos de la fila construida para el CSV.
     """
-    # Convertir tp1, tp2, tp3, tp4 a un solo campo tp (tomar el primero o concatenar)
+    # Convertir tp1, tp2, tp3, tp4 a un solo campo tp concatenado con " / "
     tp_val = None
     tp_list = []
     for i in range(1, 5):
         tp_key = f'tp{i}'
         if fila.get(tp_key) is not None:
-            tp_val = fila.get(tp_key)
-            tp_list.append(tp_val)
+            tp_list.append(str(fila.get(tp_key)))
     
-    # Si hay múltiples TPs, usar el primero (o podrías concatenarlos)
+    # Si hay TPs, concatenarlos con " / "
     if tp_list:
-        tp_val = tp_list[0]
+        tp_val = " / ".join(tp_list)
     
     SQL = f"""
         UPDATE {TABLE} 
