@@ -1086,6 +1086,12 @@ def formatear_motivo_rechazo(senal: Dict[str, Any]) -> Optional[str]:
         return None  # No aplica para señales válidas
     
     clasificacion = senal.get("clasificacion", "")
+    
+    # Si es RUIDO, solo mostrar ese mensaje y retornar inmediatamente
+    if clasificacion == "Ruido":
+        header = f"Score: {score} - Motivos de rechazo:"
+        return f"{header}\n[X] Clasificado como RUIDO"
+    
     accion = senal.get("accion")
     activo = senal.get("activo") or ""
     entrada_resuelta = senal.get("entrada_resuelta")
@@ -1099,10 +1105,8 @@ def formatear_motivo_rechazo(senal: Dict[str, Any]) -> Optional[str]:
     
     motivos = []
     
-    # Clasificación
-    if clasificacion == "Ruido":
-        motivos.append("[X] Clasificado como RUIDO")
-    elif clasificacion != "Válido":
+    # Clasificación (ya verificamos Ruido arriba, así que solo otros casos)
+    if clasificacion != "Válido":
         motivos.append(f"[X] Clasificación: {clasificacion}")
     
     # Activo
