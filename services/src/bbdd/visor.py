@@ -67,20 +67,26 @@ def fetch_rows(range_key: str):
     cur = con.cursor()
 
     cols_csv = ", ".join(COLUMNS)
+    
+    # Determinar qué tabla usar
+    if range_key == "testing":
+        table_name = "Mensajes_testados"
+    else:
+        table_name = TABLE
 
     if range_key in ("hoy", "ayer"):
         start_iso, end_iso = day_bounds_utc(range_key)
         sql = f"""
           SELECT {cols_csv}
-          FROM {TABLE}
+          FROM {table_name}
           WHERE ts_utc >= ? AND ts_utc < ?
           ORDER BY ts_utc DESC, rowid DESC
         """
         rows = cur.execute(sql, (start_iso, end_iso)).fetchall()
-    else:  # 'todo'
+    else:  # 'todo' o 'testing'
         sql = f"""
           SELECT {cols_csv}
-          FROM {TABLE}
+          FROM {table_name}
           ORDER BY ts_utc DESC, rowid DESC
         """
         rows = cur.execute(sql).fetchall()
@@ -90,13 +96,15 @@ def fetch_rows(range_key: str):
 
 def render_table(rows, range_key: str):
     html_parts = [HTML_HEAD]
-    title = {"hoy":"HOY (UTC)","ayer":"AYER (UTC)","todo":"TODO"}[range_key]
+    title_map = {"hoy":"HOY (UTC)","ayer":"AYER (UTC)","todo":"TODO","testing":"TESTING MENSAJES"}
+    title = title_map.get(range_key, "TODO")
+    table_name = "Mensajes_testados" if range_key == "testing" else TABLE
     html_parts.append(f"<h1>Traza Única — {title}</h1>")
-    html_parts.append(f"<p class='meta'>DB: <code>{html.escape(DB_PATH)}</code> — Tabla: <code>{html.escape(TABLE)}</code> — Filas: {len(rows)}</p>")
+    html_parts.append(f"<p class='meta'>DB: <code>{html.escape(DB_PATH)}</code> — Tabla: <code>{html.escape(table_name)}</code> — Filas: {len(rows)}</p>")
 
     # Navegación
     html_parts.append("<div class='nav'>")
-    for key,label in (("hoy","HOY"),("ayer","AYER"),("todo","TODO")):
+    for key,label in (("hoy","HOY"),("ayer","AYER"),("todo","TODO"),("testing","TESTING MENSAJES")):
         cls = "active" if key == range_key else ""
         href = f"/{key}"
         html_parts.append(f"<a class='{cls}' href='{href}'>{label}</a>")
@@ -132,6 +140,8 @@ class Handler(BaseHTTPRequestHandler):
             key = "ayer"
         elif self.path.startswith("/todo"):
             key = "todo"
+        elif self.path.startswith("/testing"):
+            key = "testing"
         else:
             self.send_error(404, "Not found")
             return
@@ -154,7 +164,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(msg)
 
 def main():
-    print(f"DB: {DB_PATH} | Tabla: {TABLE} | http://{HOST}:{PORT}  (rutas: /hoy /ayer /todo)")
+    print(f"DB: {DB_PATH} | Tabla: {TABLE} | http://{HOST}:{PORT}  (rutas: /hoy /ayer /todo /testing)")
     HTTPServer((HOST, PORT), Handler).serve_forever()
 
 if __name__ == "__main__":
