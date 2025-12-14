@@ -606,6 +606,17 @@ def _extract_entry_candidates(text: str) -> List[Tuple[str, List[float]]]:
         if re.match(r"\s*(lot|lots|lote|lotes)\b", tail, flags=re.IGNORECASE):
             continue
         fallback_dir_prices.append(("precio", [val]))
+    
+    # Fallback adicional: patrones "SELL BTCUSD 90220" / "BUY EURUSD 1.0850" (precio después del símbolo)
+    for m in re.finditer(r"\b(buy|sell)\b\s+[A-Z]{3,6}(?:USD|EUR|JPY|GBP|AUD|CAD|CHF|NZD|BTC|ETH)?\s+([+-]?\d[\d .,k]*)", norm, flags=re.IGNORECASE):
+        raw_num = m.group(2)
+        val = _normalize_number_str(raw_num)
+        if val is None:
+            continue
+        tail = norm[m.end(): m.end() + 8]
+        if re.match(r"\s*(lot|lots|lote|lotes)\b", tail, flags=re.IGNORECASE):
+            continue
+        fallback_dir_prices.append(("precio", [val]))
 
     # Rangos con separadores: 3815-3812, 3629 – 3632, etc.
     # MEJORA: El patrón ahora evita capturar puntos finales de puntuación usando lookahead negativo
