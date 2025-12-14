@@ -530,6 +530,68 @@ def db_update_ts_mt4_queue(oid: str, tsq: str) -> None:
                 pass
     raise sqlite3.OperationalError("database is locked (retries exhausted)")
 
+def db_update_operativos(oid: str, fila: dict) -> None:
+    """
+    Actualiza los campos operativos en Trazas_Unica cuando score=10.
+    Usa los datos de la fila construida para el CSV.
+    """
+    # Convertir tp1, tp2, tp3, tp4 a un solo campo tp (tomar el primero o concatenar)
+    tp_val = None
+    tp_list = []
+    for i in range(1, 5):
+        tp_key = f'tp{i}'
+        if fila.get(tp_key) is not None:
+            tp_val = fila.get(tp_key)
+            tp_list.append(tp_val)
+    
+    # Si hay múltiples TPs, usar el primero (o podrías concatenarlos)
+    if tp_list:
+        tp_val = tp_list[0]
+    
+    SQL = f"""
+        UPDATE {TABLE} 
+        SET ts_mt4_queue = ?,
+            symbol = ?,
+            order_type = ?,
+            entry_price = ?,
+            sl = ?,
+            tp = ?,
+            comment = ?
+        WHERE oid = ?
+    """
+    params = (
+        fila.get('ts_mt4_queue'),
+        fila.get('symbol'),
+        fila.get('order_type'),
+        fila.get('entry_price'),
+        fila.get('sl'),
+        tp_val,
+        fila.get('comment'),
+        oid
+    )
+    
+    backoff = 0.1
+    for _ in range(5):
+        conn, cur = _conn()
+        try:
+            cur.execute(SQL, params)
+            conn.commit()
+            return
+        except sqlite3.OperationalError as e:
+            if 'locked' in str(e).lower():
+                conn.close()
+                sleep(backoff)
+                backoff = min(backoff*2, 1.6)
+                continue
+            conn.close()
+            raise
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    raise sqlite3.OperationalError("database is locked (retries exhausted)")
+
 # =================== CSV ===================
 def csv_row_to_string(fila):
     """
@@ -877,15 +939,17 @@ def main():
                             else:
                                 print(f"[parseador] CSV DESACTIVADO (CSV_ENABLED=0) → omitido (oid={oid})")
 
-                            # 1b) Parche: reflejar inmediatamente ts_mt4_queue en Trazas_Unica
+                            # 1b) Actualizar campos operativos en Trazas_Unica
                             try:
-                                db_update_ts_mt4_queue(oid, fila['ts_mt4_queue'])
-                                print(f"[parseador] TSQ OK → ts_mt4_queue={fila['ts_mt4_queue']} (oid={oid})")
+                                db_update_operativos(oid, fila)
+                                print(f"[parseador] BBDD operativos OK → symbol={fila.get('symbol')} entry={fila.get('entry_price')} sl={fila.get('sl')} tp={fila.get('tp1')} (oid={oid})")
                             except Exception as e:
-                                print(f"[parseador][WARN] No se pudo actualizar ts_mt4_queue (oid={oid}): {e}")
+                                print(f"[parseador][ERROR] No se pudieron actualizar campos operativos (oid={oid}): {e}")
+                                import traceback
+                                traceback.print_exc()
 
                             csv_status = "CSV OK" if CSV_ENABLED else "CSV desactivado"
-                            print(f"[parseador] ✅ score=10 → {csv_status} + ts_mt4_queue en BBDD. Campos operativos llegarán por ACK.")
+                            print(f"[parseador] ✅ score=10 → {csv_status} + campos operativos en BBDD.")
 
                             # --- NUEVO: enviar fila CSV al EA de socket (mismo formato que se escribe en CSV) ---
                             # Solo enviar si ACTIVAR_SOCKET está activado
