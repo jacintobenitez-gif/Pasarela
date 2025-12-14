@@ -31,7 +31,7 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 # === IMPORT CORRECTO DEL ANALIZADOR (SIN NOMBRES NUEVOS) ===
-from reglasnegocio.reglasnegocio import clasificar_mensajes, formatear_senal
+from reglasnegocio.reglasnegocio import clasificar_mensajes, formatear_senal, formatear_motivo_rechazo
 
 # =================== CONFIG ===================
 REDIS_URL    = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -806,10 +806,15 @@ def main():
                             r.xack(REDIS_STREAM, REDIS_GROUP, _msg_id)
                             continue
                         mejor_resultado = _best_result(resultados)
-                        texto_formateado = formatear_senal(mejor_resultado)
+                        score = int(mejor_resultado.get("score", 0))
+                        
+                        # Formatear según el score
+                        if score == 10:
+                            texto_formateado = formatear_senal(mejor_resultado)
+                        else:
+                            texto_formateado = formatear_motivo_rechazo(mejor_resultado)
 
                         fila = _build_fila_desde_resultado(resultados, data)
-                        score = fila['score']
                         oid   = fila['oid']
 
                         tps_str = ",".join([str(fila[f'tp{i}']) for i in range(1, 5) if fila.get(f'tp{i}') is not None])
@@ -818,7 +823,13 @@ def main():
 
                         # 0) Guardar SIEMPRE en Trazas_Unica los básicos (no operativos)
                         basico = _build_basico_desde_evento(data, score, oid, texto_formateado)
-                        db_upsert_basico(basico)
+                        try:
+                            db_upsert_basico(basico)
+                            print(f"[parseador] BBDD OK → básicos guardados (oid={oid}, score={score})")
+                        except Exception as e:
+                            print(f"[parseador][ERROR] BBDD FAIL básicos (oid={oid}): {e}")
+                            import traceback
+                            traceback.print_exc()
 
                         if score == 10:
                             # 1) CSV (evita duplicado por oid) - Solo si CSV_ENABLED está activado

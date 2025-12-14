@@ -546,7 +546,36 @@ def _extract_numbers_after_keyword(text: str, keyword_regex: str, max_span: int 
     return nums
 
 def _extract_sl(text: str) -> Optional[float]:
-    sls = _extract_numbers_after_keyword(text, SL_WORDS)
+    """
+    Extrae el Stop Loss del texto.
+    Mejora: busca el número inmediatamente después de SL, pero evita tomar números de otras secciones.
+    """
+    sls = []
+    for m in re.finditer(SL_WORDS, text, flags=re.IGNORECASE):
+        start = m.end()
+        # Buscar números en una ventana limitada después de SL
+        window = text[start:start+120]
+        
+        # Buscar el primer número después de SL
+        # Si hay "SL:" seguido de espacios y luego un número, ese es el SL
+        # Buscar números en la ventana
+        nums = _find_all_numbers(window)
+        
+        if nums:
+            # Verificar si hay palabra clave TP antes del primer número
+            # Si hay "TP" o "target" antes del número, ese número no es el SL
+            first_num_pos = window.find(str(int(nums[0])))
+            if first_num_pos > 0:
+                text_before_num = window[:first_num_pos]
+                tp_match = re.search(r'\b(?:tp\d*|targets?|take\s*profit|objetivos?)\b', text_before_num, flags=re.IGNORECASE)
+                if tp_match:
+                    # Hay TP antes del número, este número no es el SL
+                    continue
+            
+            # Si llegamos aquí, el número es válido como SL
+            sls.append(nums[0])
+            break  # Solo tomar el primer SL encontrado
+    
     return sls[0] if sls else None
 
 def _extract_tps(text: str) -> List[float]:
@@ -608,7 +637,8 @@ def _extract_entry_candidates(text: str) -> List[Tuple[str, List[float]]]:
         fallback_dir_prices.append(("precio", [val]))
     
     # Fallback adicional: patrones "SELL BTCUSD 90220" / "BUY EURUSD 1.0850" (precio después del símbolo)
-    for m in re.finditer(r"\b(buy|sell)\b\s+[A-Z]{3,6}(?:USD|EUR|JPY|GBP|AUD|CAD|CHF|NZD|BTC|ETH)?\s+([+-]?\d[\d .,k]*)", norm, flags=re.IGNORECASE):
+    # También detecta "VENDER - BTCUSD - 90221" (con guiones)
+    for m in re.finditer(r"\b(buy|sell|vender|comprar)\b\s*[-]?\s*[A-Z]{3,6}(?:USD|EUR|JPY|GBP|AUD|CAD|CHF|NZD|BTC|ETH)?\s*[-]?\s*([+-]?\d[\d .,k]*)", norm, flags=re.IGNORECASE):
         raw_num = m.group(2)
         val = _normalize_number_str(raw_num)
         if val is None:
@@ -1043,6 +1073,100 @@ def formatear_senal(senal: Dict[str, Any]) -> Optional[str]:
 
     return "\n".join(lineas)
 
+def formatear_motivo_rechazo(senal: Dict[str, Any]) -> Optional[str]:
+    """
+    Formatea un mensaje explicando por qué una señal no obtuvo score=10.
+    Retorna None si score=10 (no aplica) o si no hay información suficiente.
+    """
+    if not senal:
+        return None
+    
+    score = int(senal.get("score", 0))
+    if score == 10:
+        return None  # No aplica para señales válidas
+    
+    clasificacion = senal.get("clasificacion", "")
+    accion = senal.get("accion")
+    activo = senal.get("activo") or ""
+    entrada_resuelta = senal.get("entrada_resuelta")
+    sl = senal.get("sl")
+    tps = senal.get("tp") or []
+    # Usar TPs originales si están disponibles (antes de filtrar por inconsistencia)
+    tps_originales = senal.get("tp_originales", tps)
+    consistencia = senal.get("consistencia_direccion")
+    observaciones = senal.get("observaciones")
+    target_open = senal.get("target_open", False)
+    
+    motivos = []
+    
+    # Clasificación
+    if clasificacion == "Ruido":
+        motivos.append("[X] Clasificado como RUIDO")
+    elif clasificacion != "Válido":
+        motivos.append(f"[X] Clasificación: {clasificacion}")
+    
+    # Activo
+    if not activo:
+        motivos.append("[X] No se detectó activo")
+    
+    # Acción
+    if not accion:
+        motivos.append("[X] No se detectó acción (BUY/SELL)")
+    
+    # Verificar qué falta específicamente para score=10 según _decidir_score()
+    # Para score=10 se requiere: clasificacion=Válido AND accion AND entrada_resuelta AND sl AND ≥1 TP AND consistencia != False
+    
+    # Solo reportar lo que realmente falta para obtener score=10
+    # Verificar requisitos en el mismo orden que _decidir_score()
+    
+    # Para casos especiales (PARTIAL CLOSE, CLOSEALL, BREAKEVEN, MOVETO, STOPLOSSESTO)
+    # tienen requisitos diferentes
+    es_caso_especial = accion in ("PARTIAL CLOSE", "CLOSEALL", "BREAKEVEN", "MOVETO", "STOPLOSSESTO")
+    
+    if es_caso_especial:
+        # Para MOVETO y STOPLOSSESTO solo requieren SL
+        if accion in ("MOVETO", "STOPLOSSESTO") and sl is None:
+            motivos.append("[X] No hay SL")
+    elif clasificacion == "Válido" and accion:
+        # Caso normal BUY/SELL: requiere entrada, SL y TP
+        # Verificar cada requisito individualmente
+        if entrada_resuelta is None:
+            motivos.append("[X] No hay precio de entrada")
+        
+        if sl is None:
+            motivos.append("[X] No hay SL")
+        
+        # Usar TPs originales si están disponibles (antes de filtrar)
+        tps_para_verificar = tps_originales if len(tps_originales) > len(tps) else tps
+        if not target_open and len(tps_para_verificar) == 0:
+            motivos.append("[X] No hay TP")
+    
+    # Consistencia: reportar si es False explícitamente (esto es crítico para score=10)
+    # Si hay inconsistencia, todos los campos pueden estar presentes pero mal ordenados
+    if consistencia is False:
+        # Construir mensaje más descriptivo según la dirección
+        if accion and entrada_resuelta is not None and sl is not None:
+            if accion.startswith("BUY"):
+                motivos.append("[X] Inconsistencia: Para BUY debe ser SL < Entrada < TP")
+            elif accion.startswith("SELL"):
+                motivos.append("[X] Inconsistencia: Para SELL debe ser TP < Entrada < SL")
+            else:
+                motivos.append("[X] Inconsistencia direccional (SL/TP/Entrada no coinciden)")
+        else:
+            motivos.append("[X] Inconsistencia direccional (SL/TP/Entrada no coinciden)")
+    
+    # Observaciones adicionales del clasificador
+    if observaciones:
+        motivos.append(f"[INFO] {observaciones}")
+    
+    # Si no hay motivos específicos, mensaje genérico
+    if not motivos:
+        motivos.append("[X] No cumple requisitos para score=10")
+    
+    # Construir mensaje
+    header = f"Score: {score} - Motivos de rechazo:"
+    return f"{header}\n" + "\n".join(motivos)
+
 # =========================
 # API principal
 # =========================
@@ -1165,6 +1289,9 @@ def clasificar_mensajes(texto: str) -> List[Dict[str, Any]]:
     # CHANGE 3: normalizar escala si arregla coherencia (antes de evaluarla)
     entrada_resuelta, sl, tps, _nota_escala = _normalizar_escala(direccion, entrada_resuelta, sl, tps)
 
+    # Guardar TPs originales antes de filtrar (para mensajes de rechazo)
+    tps_originales = tps.copy() if tps else []
+
     # === PARCHE: filtrar TPs por lado y exigir TP1 correcto ===
     # Si target está abierto, no validamos TP1
     if not tiene_target_open:
@@ -1205,6 +1332,9 @@ def clasificar_mensajes(texto: str) -> List[Dict[str, Any]]:
     for act in (activos or [None]):
         base = _build_output("Válido", act, accion, direccion,
                              entrada_obj, sl, tps, entrada_resuelta, entrada_fuente, consistencia, observaciones, tiene_target_open)
+        # Guardar TPs originales antes de filtrar (para mensajes de rechazo)
+        if len(tps_originales) > len(tps):
+            base["tp_originales"] = tps_originales
         base["score"] = _decidir_score(base)
         salidas.append(base)
 
