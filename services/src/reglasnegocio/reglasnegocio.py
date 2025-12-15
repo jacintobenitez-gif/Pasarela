@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 # reglasnegocio.py — Clasificador y extractor de señales de trading (línea base 2025-10-03)
 # - Clasificación: Válido / Ruido (requiere SL + TP + Activo)
 # - Activos (forex, índices, materias primas, gas, cripto; acepta abreviaturas, emojis, hashtags)
@@ -276,6 +276,27 @@ def _has_partial_close_keyword(text: str) -> bool:
     
     # Patrones en español
     patterns_es = [
+        # Patrones con "profits" / "profit"
+        r'\btomen\s+algo\s+de\s+profits\b',
+        r'\btomen\s+algo\s+de\s+profit\b',
+        r'\btomad\s+algo\s+de\s+profits\b',
+        r'\btomad\s+algo\s+de\s+profit\b',
+        r'\btomar\s+algo\s+de\s+profits\b',
+        r'\btomar\s+algo\s+de\s+profit\b',
+        r'\btomamos\s+algo\s+de\s+profits\b',
+        r'\btomamos\s+algo\s+de\s+profit\b',
+        r'\bprofits\b',  # Palabra "profits" como palabra completa
+        r'\bprofit\b',    # Palabra "profit" como palabra completa
+        # Patrones con "beneficios"
+        r'\btomen\s+beneficios\b',
+        r'\btomen\s+beneficio\b',
+        r'\btomad\s+beneficios\b',
+        r'\btomad\s+beneficio\b',
+        r'\btomar\s+beneficios\b',
+        r'\btomar\s+beneficio\b',
+        r'\btomamos\s+beneficios\b',
+        r'\btomamos\s+beneficio\b',
+        # Patrones existentes con "profits"
         r'\basegurando\s+algo\s+de\s+profits\b',
         r'\basegurando\s+profits\b',
         r'\basegurando\b',
@@ -283,17 +304,21 @@ def _has_partial_close_keyword(text: str) -> bool:
         r'\basegurad\b',
         r'\baseguren\s+partial\b',
         r'\bpartials\b',
+        # Patrones con "parcial"
         r'\bparcial\b',
         r'\bparciales\b',
-        r'\bmitad\b',
+        r'\bcierre\s+parcial\b',
+        r'\bcierres\s+parciales\b',
+        r'\bcerrar\s+parcial\b',
+        r'\bcerrar\s+parciales\b',
         r'\bcerrad\s+parcial\b',
         r'\bcerrad\s+parciales\b',
+        # Otros patrones existentes
+        r'\bmitad\b',
         r'\bcerrad\s+mitad\b',
         r'\basegurar\s+parciales\b',
         r'\basegurando\s+parciales\b',
         r'\baseguren\s+parciales\b',
-        r'\bcerrar\s+parcial\b',
-        r'\bcerrar\s+parciales\b',
         r'\bcerrar\s+mitad\b',
         r'\breducir\s+posicion\b',
         r'\breducir\s+posici[oó]n\b',
@@ -311,6 +336,13 @@ def _has_partial_close_keyword(text: str) -> bool:
         r'\btake\s+partial\b',
         r'\btake\s+partials\b',
         r'\bpartial\b',  # Solo "partial" como palabra completa
+        # Patrones con "profits" / "profit"
+        r'\btake\s+some\s+profits\b',
+        r'\btake\s+some\s+profit\b',
+        r'\btaking\s+some\s+profits\b',
+        r'\btaking\s+some\s+profit\b',
+        r'\bprofits\b',  # Palabra "profits" como palabra completa
+        r'\bprofit\b',   # Palabra "profit" como palabra completa
     ]
     
     # Verificar patrones en español
@@ -489,10 +521,10 @@ def _detect_move_sl(texto: str) -> Optional[Dict[str, Any]]:
     contiene_stoplosses = re.search(r'\bstoplosses\b', texto_lower) is not None
     
     PATTERNS = [
-        # Patrones en inglés
-        r'move\s+(?:my\s+|our\s+|your\s+|all\s+)?(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+to\s+([0-9]+(?:\.[0-9]+)?)',
-        r'moved\s+(?:my\s+|our\s+|your\s+|all\s+)?(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+to\s+([0-9]+(?:\.[0-9]+)?)',
-        r'moving\s+(?:my\s+|our\s+|your\s+|all\s+)?(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+to\s+([0-9]+(?:\.[0-9]+)?)',
+        # Patrones en inglés - permitir palabras intermedias (gold, all, etc.) antes de stoplosses
+        r'move\s+(?:my\s+|our\s+|your\s+|all\s+)?(?:\w+\s+)*(?:SL|stop\s*loss|stoploss(?:es)?|stop-loss(?:es)?)\s+to\s+([0-9]+(?:\.[0-9]+)?)',
+        r'moved\s+(?:my\s+|our\s+|your\s+|all\s+)?(?:\w+\s+)*(?:SL|stop\s*loss|stoploss(?:es)?|stop-loss(?:es)?)\s+to\s+([0-9]+(?:\.[0-9]+)?)',
+        r'moving\s+(?:my\s+|our\s+|your\s+|all\s+)?(?:\w+\s+)*(?:SL|stop\s*loss|stoploss(?:es)?|stop-loss(?:es)?)\s+to\s+([0-9]+(?:\.[0-9]+)?)',
         r'shift(?:ing)?\s+(?:my\s+|our\s+|your\s+|all\s+|the\s+)?(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+to\s+([0-9]+(?:\.[0-9]+)?)',
         r'temporarily\s+shift(?:ing)?\s+(?:my\s+|our\s+|your\s+|all\s+|the\s+)?(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+to\s+([0-9]+(?:\.[0-9]+)?)',
         r'(?:^|\s)(?:SL|stop\s*loss|stoploss|stop-loss)(?:es)?\s+to\s+([0-9]+(?:\.[0-9]+)?)',

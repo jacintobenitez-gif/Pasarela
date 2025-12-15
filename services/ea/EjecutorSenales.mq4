@@ -10,7 +10,7 @@
 #property description "Lee colaMT4.csv y ejecuta acciones de trading cada 2 segundos"
 
 //--- Inputs
-input double InpVolume      = 0.01;  // Volumen en lotes para BUY/SELL
+input double InpVolume      = 0.1;  // Volumen en lotes para BUY/SELL
 input int    InpSlippage    = 30;    // Slippage en puntos
 input int    InpMagicNumber = 0;     // Magic Number (0 = sin magic)
 
@@ -348,6 +348,26 @@ void CheckAutoCleanup()
 }
 
 //+------------------------------------------------------------------+
+//| Función auxiliar: Convertir TP string a double (OPEN = 0)       |
+//+------------------------------------------------------------------+
+double ParseTP(string tp_str)
+{
+   string tp_trimmed = TrimString(tp_str);
+   StringToUpper(tp_trimmed);
+   
+   // Si es "OPEN", devolver 0
+   if(tp_trimmed == "OPEN")
+      return 0.0;
+   
+   // Si está vacío, devolver 0
+   if(tp_trimmed == "")
+      return 0.0;
+   
+   // Convertir a double normalmente
+   return StringToDouble(tp_str);
+}
+
+//+------------------------------------------------------------------+
 //| Función auxiliar: Trim de string                                |
 //+------------------------------------------------------------------+
 string TrimString(string str)
@@ -416,7 +436,8 @@ bool ExecuteBUY(string symbol, double sl, double tp1, string comment)
    }
    else
    {
-      Print("Error BUY: ", symbol, " Error=", GetLastError(), " Comment=", comment);
+      int error_code = GetLastError();
+      Print("Error BUY: ", symbol, " Error=", error_code, " (", MyErrorDescription(error_code), ") Comment=", comment);
       return false;
    }
 }
@@ -436,7 +457,8 @@ bool ExecuteSELL(string symbol, double sl, double tp1, string comment)
    }
    else
    {
-      Print("Error SELL: ", symbol, " Error=", GetLastError(), " Comment=", comment);
+      int error_code = GetLastError();
+      Print("Error SELL: ", symbol, " Error=", error_code, " (", MyErrorDescription(error_code), ") Comment=", comment);
       return false;
    }
 }
@@ -473,7 +495,8 @@ bool ExecuteSLA(string comment, string symbol_filter, double new_sl)
       }
       else
       {
-         Print("Error SL A: Ticket=", tickets[0], " Error=", GetLastError());
+         int error_code = GetLastError();
+         Print("Error SL A: Ticket=", tickets[0], " Error=", error_code, " (", MyErrorDescription(error_code), ")");
          return false;
       }
    }
@@ -510,7 +533,8 @@ bool ExecuteVariosSLA(string comment, string symbol_filter, double new_sl)
          }
          else
          {
-            Print("Error VARIOS SL A: Ticket=", tickets[i], " Error=", GetLastError());
+            int error_code = GetLastError();
+            Print("Error VARIOS SL A: Ticket=", tickets[i], " Error=", error_code, " (", MyErrorDescription(error_code), ")");
             all_success = false;
          }
       }
@@ -548,7 +572,8 @@ bool ExecuteBREAKEVEN(string comment, string symbol_filter)
          }
          else
          {
-            Print("Error BREAKEVEN: Ticket=", tickets[i], " Error=", GetLastError());
+            int error_code = GetLastError();
+            Print("Error BREAKEVEN: Ticket=", tickets[i], " Error=", error_code, " (", MyErrorDescription(error_code), ")");
             all_success = false;
          }
       }
@@ -592,7 +617,8 @@ bool ExecutePARCIAL(string comment, string symbol_filter)
          }
          else
          {
-            Print("Error PARCIAL: Ticket=", tickets[i], " Error=", GetLastError());
+            int error_code = GetLastError();
+            Print("Error PARCIAL: Ticket=", tickets[i], " Error=", error_code, " (", MyErrorDescription(error_code), ")");
             all_success = false;
          }
       }
@@ -635,7 +661,8 @@ bool ExecuteCERRAR(string comment, string symbol_filter)
          }
          else
          {
-            Print("Error CERRAR: Ticket=", tickets[i], " Error=", GetLastError());
+            int error_code = GetLastError();
+            Print("Error CERRAR: Ticket=", tickets[i], " Error=", error_code, " (", MyErrorDescription(error_code), ")");
             all_success = false;
          }
       }
@@ -700,7 +727,7 @@ void ProcessCsvRecord(string &fields[])
          return;
       }
       double sl = StringToDouble(sl_str);
-      double tp1 = StringToDouble(tp1_str);
+      double tp1 = ParseTP(tp1_str);
       success = ExecuteBUY(symbol, sl, tp1, comment);
    }
    else if(order_type == "SELL")
@@ -711,7 +738,7 @@ void ProcessCsvRecord(string &fields[])
          return;
       }
       double sl = StringToDouble(sl_str);
-      double tp1 = StringToDouble(tp1_str);
+      double tp1 = ParseTP(tp1_str);
       success = ExecuteSELL(symbol, sl, tp1, comment);
    }
    else if(order_type == "SL A")
@@ -844,6 +871,73 @@ void OnTick()
 void OnTimer()
 {
    ProcessCsv();
+}
+
+//+------------------------------------------------------------------+
+//| Función auxiliar: Descripción de errores de trading             |
+//+------------------------------------------------------------------+
+string MyErrorDescription(int code)
+{
+   switch(code)
+   {
+      // ---- Genéricos / conexión / cuenta ----
+      case 0:   return "0: Sin error";
+      case 1:   return "1: Sin error, pero resultado desconocido";
+      case 2:   return "2: Error común (Common error)";
+      case 3:   return "3: Parámetros de trade no válidos (invalid trade parameters)";
+      case 4:   return "4: Servidor ocupado (trade server busy)";
+      case 5:   return "5: Versión antigua del terminal (old terminal version)";
+      case 6:   return "6: Sin conexión con el servidor (no connection)";
+      case 7:   return "7: Permisos insuficientes (not enough rights)";
+      case 8:   return "8: Peticiones demasiado frecuentes (too frequent requests)";
+      case 9:   return "9: Operación de trade malfuncionando (malfunctional trade operation)";
+      case 64:  return "64: Cuenta deshabilitada (account disabled)";
+      case 65:  return "65: Cuenta no válida (invalid account)";
+
+      // ---- Errores de trade del servidor ----
+      case 128: return "128: Trade timeout (tiempo de espera agotado)";
+      case 129: return "129: Invalid price (precio inválido o ya no disponible)";
+      case 130: return "130: Invalid stops (SL/TP mal puestos o demasiado cerca)";
+      case 131: return "131: Invalid trade volume (lote inválido)";
+      case 132: return "132: Market closed (mercado cerrado)";
+      case 133: return "133: Trade disabled (trading deshabilitado para el símbolo/cuenta)";
+      case 134: return "134: Not enough money (margen insuficiente)";
+      case 135: return "135: Price changed (el precio cambió antes de ejecutar)";
+      case 136: return "136: Off quotes (sin cotización válida del broker)";
+      case 137: return "137: Broker busy (servidor ocupado/broker busy)";
+      case 138: return "138: Requote (nuevo precio enviado, requote)";
+      case 139: return "139: Order locked (orden bloqueada)";
+      case 140: return "140: Only long positions allowed (solo largos permitidos)";
+      case 141: return "141: Too many requests (demasiadas peticiones de trade)";
+      case 145: return "145: Modification denied (modificación de orden denegada)";
+      case 146: return "146: Trade context busy (contexto de trade ocupado)";
+      case 147: return "147: Expiración demasiado cercana o incorrecta";
+      case 148: return "148: Too many orders (demasiadas órdenes abiertas/pendientes)";
+      case 149: return "149: Hedging prohibido (hedging no permitido en la cuenta)";
+      case 150: return "150: Proximidad de stops (SL/TP demasiado cerca del precio actual)";
+
+      // ---- Algunos errores típicos del terminal / cliente ----
+      case 4000: return "4000: Error interno del terminal (no error detail)";
+      case 4001: return "4001: Puntero de función incorrecto";
+      case 4002: return "4002: Índice de array fuera de rango";
+      case 4003: return "4003: Sin memoria para la pila de llamadas (call stack)";
+      case 4004: return "4004: Desbordamiento de recursión (recursion stack overflow)";
+      case 4005: return "4005: Pila de ejecución insuficiente (not enough stack for parameter)";
+      case 4006: return "4006: Sin memoria para cadena (string)";
+      case 4007: return "4007: Sin memoria para array";
+      case 4008: return "4008: Sin memoria para historial";
+      case 4009: return "4009: Sin memoria para indicador personalizado";
+
+      // ---- Errores muy típicos al programar EAs ----
+      case 4106: return "4106: Símbolo desconocido o no válido";
+      case 4107: return "4107: Parámetro de precio no válido";
+      case 4108: return "4108: Ticket de orden no válido";
+      case 4109: return "4109: Trade not allowed (AutoTrading desactivado o EA sin permisos)";
+      case 4110: return "4110: Solo posiciones largas permitidas para este símbolo";
+
+      default:
+         return "Error " + IntegerToString(code) + ": descripción no definida en MyErrorDescription()";
+   }
 }
 
 //+------------------------------------------------------------------+
