@@ -81,15 +81,13 @@ void AppendEventToCSV(string eventType,
                       double tp,
                       double closePrice,
                       datetime closeTime,
-                      double profit,
-                      int    magic,
-                      string comment)
+                      double profit)
 {
-   // *** IMPORTANTE: READ + WRITE para NO truncar el fichero ***
+   // *** IMPORTANTE: Usar FILE_TXT en lugar de FILE_CSV para evitar problemas de codificación ***
+   // READ + WRITE para NO truncar el fichero
    int handle = FileOpen(InpCSVFileName,
-                         FILE_CSV | FILE_READ | FILE_WRITE | FILE_COMMON |
-                         FILE_SHARE_READ | FILE_SHARE_WRITE,
-                         ';');
+                         FILE_TXT | FILE_READ | FILE_WRITE | FILE_COMMON |
+                         FILE_SHARE_READ | FILE_SHARE_WRITE);
 
    if(handle == INVALID_HANDLE)
    {
@@ -112,21 +110,22 @@ void AppendEventToCSV(string eventType,
 
    string sProfit     = DoubleToString(profit, 2);
 
-   FileWrite(handle,
-             eventType,      // 1  OPEN / CLOSE
-             ticket,         // 2
-             orderTypeStr,   // 3
-             sLots,          // 4
-             symbol,         // 5
-             sOpenPrice,     // 6
-             sOpenTime,      // 7
-             sSL,            // 8
-             sTP,            // 9
-             sClosePrice,    // 10
-             sCloseTime,     // 11
-             sProfit,        // 12
-             magic,          // 13
-             comment);       // 14
+   // Construir línea manualmente con delimitador ;
+   string line = eventType + ";" +
+                 IntegerToString(ticket) + ";" +
+                 orderTypeStr + ";" +
+                 sLots + ";" +
+                 symbol + ";" +
+                 sOpenPrice + ";" +
+                 sOpenTime + ";" +
+                 sSL + ";" +
+                 sTP + ";" +
+                 sClosePrice + ";" +
+                 sCloseTime + ";" +
+                 sProfit;
+
+   // Escribir línea completa (FileWrite con FILE_TXT añade salto de línea automáticamente)
+   FileWrite(handle, line);
 
    FileClose(handle);
 }
@@ -139,9 +138,8 @@ void InitCSVIfNeeded()
 {
    // Intentar abrir en lectura en carpeta COMMON
    int hRead = FileOpen(InpCSVFileName,
-                        FILE_CSV | FILE_READ |
-                        FILE_COMMON | FILE_SHARE_READ | FILE_SHARE_WRITE,
-                        ';');
+                        FILE_TXT | FILE_READ |
+                        FILE_COMMON | FILE_SHARE_READ | FILE_SHARE_WRITE);
    if(hRead != INVALID_HANDLE)
    {
       FileClose(hRead);
@@ -150,9 +148,8 @@ void InitCSVIfNeeded()
 
    // No existe: crear y escribir cabecera nueva
    int handle = FileOpen(InpCSVFileName,
-                         FILE_CSV | FILE_WRITE |
-                         FILE_COMMON | FILE_SHARE_READ | FILE_SHARE_WRITE,
-                         ';');
+                         FILE_TXT | FILE_WRITE |
+                         FILE_COMMON | FILE_SHARE_READ | FILE_SHARE_WRITE);
    if(handle == INVALID_HANDLE)
    {
       Print("Observador_Common: ERROR al crear CSV '", InpCSVFileName,
@@ -160,21 +157,9 @@ void InitCSVIfNeeded()
       return;
    }
 
-   FileWrite(handle,
-             "event_type",     // 1
-             "ticket",         // 2
-             "order_type",     // 3
-             "lots",           // 4
-             "symbol",         // 5
-             "open_price",     // 6
-             "open_time",      // 7
-             "sl",             // 8
-             "tp",             // 9
-             "close_price",    // 10
-             "close_time",     // 11
-             "profit",         // 12
-             "magic",          // 13
-             "comment");       // 14
+   // Escribir cabecera manualmente con delimitador ;
+   string header = "event_type;ticket;order_type;lots;symbol;open_price;open_time;sl;tp;close_price;close_time;profit";
+   FileWrite(handle, header);
 
    FileClose(handle);
 }
@@ -265,9 +250,7 @@ void OnTick()
                              OrderTakeProfit(),
                              0.0,
                              0,
-                             0.0,
-                             OrderMagicNumber(),
-                             OrderComment());
+                             0.0);
 
             // Guardar estado inicial (SL/TP)
             g_prevTickets[k] = t;
@@ -320,9 +303,7 @@ void OnTick()
                              OrderTakeProfit(),
                              0.0,
                              0,
-                             0.0,
-                             OrderMagicNumber(),
-                             OrderComment());
+                             0.0);
             
             // Nota: El estado previo se guardará en la sección 4 al final
          }
@@ -377,9 +358,7 @@ void OnTick()
                                    currentTP,  // Nuevo TP
                                    0.0,
                                    0,
-                                   0.0,
-                                   OrderMagicNumber(),
-                                   OrderComment());
+                                   0.0);
                   
                   // Actualizar estado previo inmediatamente
                   g_prevOrders[prevIdx].sl = currentSL;
@@ -422,9 +401,7 @@ void OnTick()
                              OrderTakeProfit(),
                              OrderClosePrice(),
                              OrderCloseTime(),
-                             OrderProfit(),
-                             OrderMagicNumber(),
-                             OrderComment());
+                             OrderProfit());
          }
       }
    }
