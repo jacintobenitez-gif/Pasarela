@@ -25,7 +25,7 @@ string g_oids_reintentando[];       // oids con contador 0, 1, 2
 int    g_contadores_reintentos[];   // contador paralelo a g_oids_reintentando[]
 
 //--- Mapeo de channels a códigos numéricos
-string g_channels[] = {"JB UNITED", "JB TORO", "JB GOLD VIP IÑAKI", "PRUEBAS RUBEN Y JACINTO"};
+string g_channels[] = {"JBUNITED", "TOROGOLDV", "INAQUIGOLD", "PRUEBASRUBENJACINTO"};
 int    g_codigos[]  = {1, 2, 3, 4};
 
 //+------------------------------------------------------------------+
