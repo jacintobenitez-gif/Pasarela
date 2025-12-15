@@ -5,6 +5,7 @@
 //|   Lee aperturas y cierres y los escribe en Common\Files          |
 //|   Fichero: TradeEvents.csv (compartido por todos los MT4/MT5)    |
 //|   v1.1: añade columnas SL y TP                                   |
+//|   v1.2: detecta cambios en SL/TP y escribe eventos MODIFY        |
 //+------------------------------------------------------------------+
 #property strict
 
@@ -14,7 +15,16 @@ input string InpCSVFileName = "TradeEvents.csv";
 // Tamaño máximo de órdenes que vamos a manejar
 #define MAX_ORDERS 500
 
+// Estructura para almacenar estado previo de cada orden (SL/TP)
+struct OrderState
+{
+   int    ticket;
+   double sl;
+   double tp;
+};
+
 int  g_prevTickets[MAX_ORDERS];  // Tickets abiertos en el tick anterior
+OrderState g_prevOrders[MAX_ORDERS]; // Estado previo completo (SL/TP)
 int  g_prevCount      = 0;       // Cuántos había
 bool g_initialized    = false;   // Para no disparar eventos en el primer tick
 
@@ -29,6 +39,31 @@ bool TicketInArray(int ticket, int &arr[], int size)
          return(true);
    }
    return(false);
+}
+
+//+------------------------------------------------------------------+
+//| Busca el índice de un ticket en el array de estados previos      |
+//| Retorna -1 si no se encuentra                                     |
+//+------------------------------------------------------------------+
+int FindOrderStateIndex(int ticket, OrderState &states[], int size)
+{
+   for(int i = 0; i < size; i++)
+   {
+      if(states[i].ticket == ticket)
+         return(i);
+   }
+   return(-1);
+}
+
+//+------------------------------------------------------------------+
+//| Compara dos valores double con tolerancia para evitar falsos     |
+//| positivos por redondeo                                            |
+//+------------------------------------------------------------------+
+bool DoubleChanged(double val1, double val2)
+{
+   // Tolerancia: 1 punto (0.00001 para pares de 5 decimales)
+   double tolerance = 0.00001;
+   return(MathAbs(val1 - val2) > tolerance);
 }
 
 //+------------------------------------------------------------------+
@@ -149,11 +184,19 @@ void InitCSVIfNeeded()
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   Print("Observador_Common v1.1 inicializado. CSV(COMMON) = ", InpCSVFileName);
+   Print("Observador_Common v1.2 inicializado. CSV(COMMON) = ", InpCSVFileName);
 
    g_prevCount   = 0;
    g_initialized = false;
    ArrayInitialize(g_prevTickets, 0);
+   
+   // Inicializar array de estados previos
+   for(int i = 0; i < MAX_ORDERS; i++)
+   {
+      g_prevOrders[i].ticket = 0;
+      g_prevOrders[i].sl = 0.0;
+      g_prevOrders[i].tp = 0.0;
+   }
 
    InitCSVIfNeeded();
 
@@ -225,9 +268,20 @@ void OnTick()
                              0.0,
                              OrderMagicNumber(),
                              OrderComment());
-         }
 
-         g_prevTickets[k] = t;
+            // Guardar estado inicial (SL/TP)
+            g_prevTickets[k] = t;
+            g_prevOrders[k].ticket = t;
+            g_prevOrders[k].sl = OrderStopLoss();
+            g_prevOrders[k].tp = OrderTakeProfit();
+         }
+         else
+         {
+            g_prevTickets[k] = 0;
+            g_prevOrders[k].ticket = 0;
+            g_prevOrders[k].sl = 0.0;
+            g_prevOrders[k].tp = 0.0;
+         }
       }
 
       g_prevCount   = curCount;
@@ -269,6 +323,69 @@ void OnTick()
                              0.0,
                              OrderMagicNumber(),
                              OrderComment());
+            
+            // Nota: El estado previo se guardará en la sección 4 al final
+         }
+      }
+   }
+
+   //================= 2.5) Detectar MODIFICACIONES de SL/TP ============
+   for(int mod = 0; mod < curCount; mod++)
+   {
+      int t = curTickets[mod];
+      
+      // Solo revisar órdenes que ya existían antes (no nuevas)
+      if(TicketInArray(t, g_prevTickets, g_prevCount))
+      {
+         if(OrderSelect(t, SELECT_BY_TICKET, MODE_TRADES))
+         {
+            // Buscar estado previo
+            int prevIdx = FindOrderStateIndex(t, g_prevOrders, g_prevCount);
+            if(prevIdx >= 0)
+            {
+               double currentSL = OrderStopLoss();
+               double currentTP = OrderTakeProfit();
+               double prevSL = g_prevOrders[prevIdx].sl;
+               double prevTP = g_prevOrders[prevIdx].tp;
+               
+               // Detectar cambios (con tolerancia para evitar falsos positivos)
+               bool slChanged = DoubleChanged(currentSL, prevSL);
+               bool tpChanged = DoubleChanged(currentTP, prevTP);
+               
+               if(slChanged || tpChanged)
+               {
+                  string tipo;
+                  switch(OrderType())
+                  {
+                     case OP_BUY:       tipo = "BUY";       break;
+                     case OP_SELL:      tipo = "SELL";      break;
+                     case OP_BUYLIMIT:  tipo = "BUYLIMIT";  break;
+                     case OP_SELLLIMIT: tipo = "SELLLIMIT"; break;
+                     case OP_BUYSTOP:   tipo = "BUYSTOP";   break;
+                     case OP_SELLSTOP:  tipo = "SELLSTOP"; break;
+                     default:           tipo = "OTRO";      break;
+                  }
+                  
+                  AppendEventToCSV("MODIFY",
+                                   t,
+                                   tipo,
+                                   OrderLots(),
+                                   OrderSymbol(),
+                                   OrderOpenPrice(),
+                                   OrderOpenTime(),
+                                   currentSL,  // Nuevo SL
+                                   currentTP,  // Nuevo TP
+                                   0.0,
+                                   0,
+                                   0.0,
+                                   OrderMagicNumber(),
+                                   OrderComment());
+                  
+                  // Actualizar estado previo inmediatamente
+                  g_prevOrders[prevIdx].sl = currentSL;
+                  g_prevOrders[prevIdx].tp = currentTP;
+               }
+            }
          }
       }
    }
@@ -315,6 +432,22 @@ void OnTick()
    //================= 4) Actualizar lista previa ========================
    g_prevCount = curCount;
    for(int m = 0; m < curCount; m++)
+   {
       g_prevTickets[m] = curTickets[m];
+      
+      // Actualizar estado previo (SL/TP) para la próxima comparación
+      if(OrderSelect(curTickets[m], SELECT_BY_TICKET, MODE_TRADES))
+      {
+         g_prevOrders[m].ticket = curTickets[m];
+         g_prevOrders[m].sl = OrderStopLoss();
+         g_prevOrders[m].tp = OrderTakeProfit();
+      }
+      else
+      {
+         g_prevOrders[m].ticket = 0;
+         g_prevOrders[m].sl = 0.0;
+         g_prevOrders[m].tp = 0.0;
+      }
+   }
 }
 
