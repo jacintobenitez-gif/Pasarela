@@ -1,8 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                              ClonadorOrdenes.mq4 |
 //|   Lee TradeEvents.csv (Common\Files) y clona operaciones         |
-//|   OPEN/CLOSE/MODIFY del maestro en esta cuenta (MT4)            |
-//|   v1.1: añade soporte para eventos MODIFY (cambios SL/TP)       |
+//|   OPEN/CLOSE del maestro en esta cuenta (MT4)                    |
 //+------------------------------------------------------------------+
 #property strict
 
@@ -113,56 +112,44 @@ bool CloneAlreadyExists(string symbol, string cloneComment)
    return(false);
 }
 
-// Busca el ticket del clon abierto por símbolo y comentario
-// Retorna el ticket si existe, o -1 si no se encuentra
-int FindCloneTicket(string symbol, string cloneComment)
+// Cierra el clon si está abierto (mismo símbolo + comentario)
+bool CloseCloneIfOpen(string symbol, string cloneComment)
 {
    for(int i = OrdersTotal() - 1; i >= 0; i--)
    {
       if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
          continue;
 
-      if(OrderSymbol()  == symbol &&
-         OrderComment() == cloneComment)
-         return(OrderTicket());
+      if(OrderSymbol()  != symbol)        continue;
+      if(OrderComment() != cloneComment)  continue;
+
+      int    type = OrderType();
+      double lots = OrderLots();
+
+      double price = (type == OP_BUY ? GetBid(symbol) : GetAsk(symbol));
+
+      bool ok = OrderClose(OrderTicket(), lots, price, InpSlippagePoints, clrRed);
+      if(!ok)
+      {
+         int err = GetLastError();
+         PrintFormat("OIExecutor(MT4): error al cerrar clon %s (%s). Error=%d",
+                     symbol, cloneComment, err);
+         return(false);
+      }
+      else
+      {
+         PrintFormat("OIExecutor(MT4): clon CERRADO %s (%s)", symbol, cloneComment);
+         return(true);
+      }
    }
-   return(-1);
-}
-
-// Cierra el clon si está abierto (mismo símbolo + comentario)
-bool CloseCloneIfOpen(string symbol, string cloneComment)
-{
-   int cloneTicket = FindCloneTicket(symbol, cloneComment);
-   if(cloneTicket < 0)
-      return(false); // No encontrado -> ya está cerrado o nunca existió
-
-   if(!OrderSelect(cloneTicket, SELECT_BY_TICKET, MODE_TRADES))
-      return(false);
-
-   int    type = OrderType();
-   double lots = OrderLots();
-   double price = (type == OP_BUY ? GetBid(symbol) : GetAsk(symbol));
-
-   bool ok = OrderClose(cloneTicket, lots, price, InpSlippagePoints, clrRed);
-   if(!ok)
-   {
-      int err = GetLastError();
-      PrintFormat("OIExecutor(MT4): error al cerrar clon %s (%s). Error=%d",
-                  symbol, cloneComment, err);
-      return(false);
-   }
-   else
-   {
-      PrintFormat("OIExecutor(MT4): clon CERRADO %s (%s)", symbol, cloneComment);
-      return(true);
-   }
+   // No encontrado -> ya está cerrado o nunca existió
+   return(false);
 }
 
 //+------------------------------------------------------------------+
 //| Procesa el CSV completo                                          |
 //|  - OPEN  -> crear clon (si no existe ni abierto ni en histórico) |
 //|  - CLOSE -> cerrar clon si está abierto                          |
-//|  - MODIFY -> actualizar SL/TP del clon si está abierto          |
 //+------------------------------------------------------------------+
 void ProcessCsv()
 {
@@ -262,52 +249,6 @@ void ProcessCsv()
       else if(event_type == "CLOSE")
       {
          CloseCloneIfOpen(symbol, cloneComment);
-      }
-      //========================
-      // 3) MODIFY -> actualizar SL/TP del clon
-      //========================
-      else if(event_type == "MODIFY")
-      {
-         int cloneTicket = FindCloneTicket(symbol, cloneComment);
-         if(cloneTicket < 0)
-         {
-            // Clon no encontrado (ya cerrado o nunca existió) - ignorar silenciosamente
-            continue;
-         }
-
-         if(!OrderSelect(cloneTicket, SELECT_BY_TICKET, MODE_TRADES))
-         {
-            PrintFormat("OIExecutor(MT4): no se pudo seleccionar clon %d para modificar", cloneTicket);
-            continue;
-         }
-
-         // Leer nuevos SL/TP del CSV (campos 7 y 8)
-         double newSL = 0.0;
-         double newTP = 0.0;
-         if(cnt > 7 && fields[7] != "")
-            newSL = StrToDouble(fields[7]);
-         if(cnt > 8 && fields[8] != "")
-            newTP = StrToDouble(fields[8]);
-
-         // Modificar el clon con los nuevos SL/TP
-         bool ok = OrderModify(cloneTicket,
-                               OrderOpenPrice(),  // Precio de apertura no cambia
-                               newSL,             // Nuevo Stop Loss
-                               newTP,             // Nuevo Take Profit
-                               0,                 // Expiración (0 = sin expiración)
-                               clrBlue);          // Color
-
-         if(!ok)
-         {
-            int err = GetLastError();
-            PrintFormat("OIExecutor(MT4): error al modificar clon %s (%s) SL=%.5f TP=%.5f. Error %d: %s",
-                        symbol, cloneComment, newSL, newTP, err, MyErrorDescription(err));
-         }
-         else
-         {
-            PrintFormat("OIExecutor(MT4): clon MODIFICADO %s (%s) SL=%.5f TP=%.5f (maestro %s)",
-                        symbol, cloneComment, newSL, newTP, masterTicketStr);
-         }
       }
       // Otros tipos se ignoran
    }

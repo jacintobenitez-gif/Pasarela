@@ -117,13 +117,23 @@ bool CloneAlreadyExists(string symbol, string cloneComment)
          return(true);
    }
 
-   // 2) HISTÓRICO: Simplificado en MQL5
-   // Nota: El comentario incluye el ticket del maestro que es único por orden.
-   // Si una posición está cerrada, no debería impedir crear un nuevo clon.
-   // La verificación del histórico en MQL5 es compleja y requiere iterar sobre deals,
-   // por lo que por simplicidad solo verificamos posiciones abiertas.
-   // Si necesitas verificación del histórico, se puede implementar iterando sobre
-   // HistoryDealsTotal() y usando HistoryDealGetInteger() para obtener POSITION_IDENTIFIER.
+   // 2) HISTÓRICO (últimas 24 horas)
+   // En MQL5, las posiciones cerradas se buscan en el historial de deals
+   datetime from = TimeCurrent() - 86400; // 24 horas atrás
+   datetime to = TimeCurrent();
+   if(HistorySelect(from, to))
+   {
+      // Buscar en el historial de posiciones cerradas
+      for(int j = HistoryPositionsTotal() - 1; j >= 0; j--)
+      {
+         ulong posTicket = HistoryPositionGetTicket(j);
+         if(posTicket == 0) continue;
+
+         if(HistoryPositionGetString(posTicket, POSITION_SYMBOL) == symbol &&
+            HistoryPositionGetString(posTicket, POSITION_COMMENT) == cloneComment)
+            return(true);
+      }
+   }
 
    return(false);
 }
@@ -204,124 +214,41 @@ void ProcessCsv()
 {
    ResetLastError();
 
-   // Leer en modo BINARIO para evitar problemas de codificación
-   int handle = FileOpen(InpCsvFileName, FILE_READ|FILE_BIN|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
+   // Abrimos como texto normal, SIN FILE_CSV, para leer línea completa
+   int handle = FileOpen(InpCsvFileName,
+                         FILE_READ | FILE_TXT | FILE_COMMON |
+                         FILE_SHARE_READ | FILE_SHARE_WRITE);
    if(handle == INVALID_HANDLE)
    {
       int err = GetLastError();
       if(err != 4103) // 4103 = archivo no existe
-         PrintFormat("OIExecutor(MT5): Error al abrir CSV: %s Error=%d", InpCsvFileName, err);
+         PrintFormat("OIExecutor(MT5): no se pudo abrir '%s'. Error=%d",
+                     InpCsvFileName, err);
       return;
    }
-   
-   // Verificar tamaño del archivo
-   ulong file_size = FileSize(handle);
-   if(file_size == 0)
+
+   // Saltar cabecera (primera línea completa)
+   if(!FileIsEnding(handle))
+      FileReadString(handle);
+
+   // Recorrer resto de líneas (cada vuelta = una línea CSV)
+   while(!FileIsEnding(handle))
    {
-      PrintFormat("OIExecutor(MT5): Archivo vacío");
-      FileClose(handle);
-      return;
-   }
-   
-   // Leer todo el archivo en binario
-   uchar bytes[];
-   ArrayResize(bytes, (int)file_size);
-   uint bytes_read = FileReadArray(handle, bytes, 0, (int)file_size);
-   FileClose(handle);
-   
-   if(bytes_read == 0)
-   {
-      PrintFormat("OIExecutor(MT5): ERROR - No se pudieron leer bytes del archivo");
-      return;
-   }
-   
-   // Detectar y saltar BOM UTF-8 si existe
-   int start_pos = 0;
-   if(bytes_read >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
-   {
-      start_pos = 3;
-   }
-   
-   // Convertir bytes a string (UTF-8 o ANSI)
-   uchar content_bytes[];
-   int content_size = bytes_read - start_pos;
-   ArrayResize(content_bytes, content_size);
-   ArrayCopy(content_bytes, bytes, 0, start_pos, content_size);
-   
-   string file_content = CharArrayToString(content_bytes, 0, WHOLE_ARRAY, 65001); // UTF-8
-   if(StringLen(file_content) == 0)
-   {
-      file_content = CharArrayToString(content_bytes, 0, WHOLE_ARRAY, 0); // ANSI fallback
-   }
-   
-   if(StringLen(file_content) == 0)
-   {
-      PrintFormat("OIExecutor(MT5): ERROR - No se pudo convertir contenido a string");
-      return;
-   }
-   
-   // Dividir por líneas
-   string lines[];
-   int line_count = 0;
-   
-   // Intentar con \r primero (Windows)
-   string temp_lines[];
-   int temp_count = StringSplit(file_content, '\r', temp_lines);
-   if(temp_count > 1)
-   {
-      ArrayResize(lines, temp_count);
-      for(int i = 0; i < temp_count; i++)
-      {
-         string clean = temp_lines[i];
-         StringReplace(clean, "\n", "");
-         lines[i] = clean;
-      }
-      line_count = temp_count;
-   }
-   else
-   {
-      line_count = StringSplit(file_content, '\n', lines);
-   }
-   
-   if(line_count < 2)
-   {
-      PrintFormat("OIExecutor(MT5): Archivo tiene menos de 2 líneas");
-      return;
-   }
-   
-   // Procesar cada línea (saltar primera que es la cabecera)
-   int processed_count = 0;
-   for(int i = 1; i < line_count; i++)
-   {
-      string line = lines[i];
-      
-      // Limpiar espacios
-      while(StringLen(line) > 0 && StringGetCharacter(line, 0) == ' ')
-         line = StringSubstr(line, 1);
-      while(StringLen(line) > 0 && StringGetCharacter(line, StringLen(line)-1) == ' ')
-         line = StringSubstr(line, 0, StringLen(line)-1);
-      
-      // Saltar líneas vacías o muy cortas
+      string line = FileReadString(handle);
       if(line == "" || StringLen(line) < 3)
          continue;
-      
-      // Dividir línea por punto y coma
+
       string fields[];
       int cnt = StringSplit(line, ';', fields);
-      
       if(cnt < 5)
-      {
-         PrintFormat("OIExecutor(MT5): Línea tiene solo %d campos (mínimo 5 requeridos), saltando: '%s'", cnt, line);
          continue;
-      }
-      
-      // Extraer campos principales
+
       string event_type      = fields[0];
       string masterTicketStr = fields[1];
       string orderTypeText   = fields[2];
       string lotsText        = fields[3];
       string symbol          = fields[4];
-      
+
       // Comentario estándar del clon
       string cloneComment = "CLONE Tkt " + masterTicketStr;
 
@@ -444,11 +371,9 @@ void ProcessCsv()
          }
       }
       // Otros tipos se ignoran
-      
-      processed_count++;
    }
-   
-   PrintFormat("OIExecutor(MT5): Procesamiento completado. %d líneas procesadas", processed_count);
+
+   FileClose(handle);
 }
 
 //+------------------------------------------------------------------+
@@ -543,5 +468,3 @@ string MyErrorDescription(int code)
          return "Error " + IntegerToString(code) + ": descripción no definida en MyErrorDescription()";
    }
 }
-
-
