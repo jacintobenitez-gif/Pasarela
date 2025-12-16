@@ -25,7 +25,7 @@ string g_oids_reintentando[];       // oids con contador 0, 1, 2
 int    g_contadores_reintentos[];   // contador paralelo a g_oids_reintentando[]
 
 //--- Mapeo de channels a códigos numéricos
-string g_channels[] = {"JBUNITED", "TOROGOLDV", "INAQUIGOLD", "PRUEBASRUBENJACINTO"};
+string g_channels[] = {"JBUNITED", "TOROGOLDV", "INAQUIGOLD", "PruebasPRE"};
 int    g_codigos[]  = {1, 2, 3, 4};
 
 //+------------------------------------------------------------------+
@@ -135,22 +135,22 @@ void SetRetryCount(string oid, int count)
 //+------------------------------------------------------------------+
 bool OrderExistsInHistory(string comment)
 {
-   // Buscar en posiciones abiertas
+   // Buscar en posiciones abiertas con coincidencia exacta
    for(int i = 0; i < OrdersTotal(); i++)
    {
       if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
       {
-         if(StringFind(OrderComment(), comment) >= 0)
+         if(OrderComment() == comment)
             return true;
       }
    }
    
-   // Buscar en historial
+   // Buscar en historial con coincidencia exacta
    for(int i = 0; i < OrdersHistoryTotal(); i++)
    {
       if(OrderSelect(i, SELECT_BY_POS, MODE_HISTORY))
       {
-         if(StringFind(OrderComment(), comment) >= 0)
+         if(OrderComment() == comment)
             return true;
       }
    }
@@ -170,11 +170,11 @@ int FindPositionsByComment(string comment, string symbol_filter, int &tickets[])
    {
       if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
       {
-         // Verificar comment
-         if(StringFind(OrderComment(), comment) < 0)
+         // Verificar comment con coincidencia exacta (100%)
+         if(OrderComment() != comment)
             continue;
          
-         // Verificar symbol si viene filtro
+         // Verificar symbol si viene filtro (mantenido para compatibilidad con otras funciones)
          if(symbol_filter != "" && OrderSymbol() != symbol_filter)
             continue;
          
@@ -633,7 +633,8 @@ bool ExecutePARCIAL(string comment, string symbol_filter)
 bool ExecuteCERRAR(string comment, string symbol_filter)
 {
    int tickets[];
-   int count = FindPositionsByComment(comment, symbol_filter, tickets);
+   // CERRAR: No filtrar por símbolo, solo por comment exacto
+   int count = FindPositionsByComment(comment, "", tickets);
    
    if(count == 0)
    {
