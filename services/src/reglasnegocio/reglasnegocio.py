@@ -683,7 +683,8 @@ def _extract_entry_candidates(text: str) -> List[Tuple[str, List[float]]]:
     # Rangos con separadores: 3815-3812, 3629 – 3632, etc.
     # MEJORA: El patrón ahora evita capturar puntos finales de puntuación usando lookahead negativo
     # para detenerse antes de signos de puntuación que no son parte del número
-    for m in re.finditer(r"([+-]?\d[\d .,k]+?)\s*"+RANGE_SEPARATORS+r"\s*([+-]?\d[\d .,k]+?)(?=[\s\.\,\!\?\:\;]|$)", norm, flags=re.IGNORECASE):
+    # Incluye paréntesis de cierre para detectar rangos como (4383-4389)
+    for m in re.finditer(r"([+-]?\d[\d .,k]+?)\s*"+RANGE_SEPARATORS+r"\s*([+-]?\d[\d .,k]+?)(?=[\s\.\,\!\?\:\;\)]|$)", norm, flags=re.IGNORECASE):
         a = _normalize_number_str(m.group(1))
         b = _normalize_number_str(m.group(2))
         if a is not None and b is not None and a != b:

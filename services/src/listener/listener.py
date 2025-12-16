@@ -283,6 +283,11 @@ async def main():
 
         title    = getattr(chat, "title", "") or ""
         username = getattr(chat, "username", "") or ""
+        # Fallback: usar username del archivo de configuración si el canal no tiene username en Telegram
+        if not username:
+            config_username = CHANNEL_CONFIG.get(ch_id, {}).get("username", "")
+            if config_username:
+                username = config_username
         if username in EXCLUDE_USERNAMES or title in EXCLUDE_TITLES:
             return
 
@@ -336,6 +341,11 @@ async def main():
 
         title    = getattr(chat, "title", "") or ""
         username = getattr(chat, "username", "") or ""
+        # Fallback: usar username del archivo de configuración si el canal no tiene username en Telegram
+        if not username:
+            config_username = CHANNEL_CONFIG.get(ch_id, {}).get("username", "")
+            if config_username:
+                username = config_username
         if username in EXCLUDE_USERNAMES or title in EXCLUDE_TITLES:
             return
 
