@@ -209,11 +209,11 @@ def _has_sl_keyword(text: str) -> bool:
 def _has_tp_keyword(text: str) -> bool:
     return re.search(TP_WORDS, text, flags=re.IGNORECASE) is not None
 
-def _has_closeall_keyword(text: str) -> bool:
+def _has_close_keyword(text: str) -> bool:
     """
     Detecta si el texto contiene referencias a cerrar todas las posiciones.
     Nota: "close" y "cerrar" solas NO se detectan (necesitan contexto).
-    "closed" en pasado SÍ se detecta como CLOSEALL.
+    "closed" en pasado SÍ se detecta como CLOSE.
     """
     text_lower = text.lower()
     
@@ -271,12 +271,30 @@ def _has_closeall_keyword(text: str) -> bool:
 def _has_partial_close_keyword(text: str) -> bool:
     """
     Detecta si el texto contiene referencias a cierre parcial.
+    NOTA: Si el texto contiene indicadores de CLOSE (como "close all", "cerrar todo"),
+    esta función retornará False para evitar conflictos (CLOSE tiene prioridad).
     """
     text_lower = text.lower()
     
+    # Excluir casos donde hay indicadores claros de CLOSE (para evitar conflictos)
+    # Si contiene "close all", "cerrar todo", etc., no es PARTIAL CLOSE
+    exclude_patterns = [
+        r'\bclose\s+all\b',
+        r'\bclose\s+everything\b',
+        r'\bcerrar\s+todo\b',
+        r'\bcerrar\s+todas\b',
+        r'\banular\b',
+        r'\banulamos\b',
+        r'\bcierren\s+todo\b',
+        r'\bcerrad\s+todo\b',
+    ]
+    for exclude_pattern in exclude_patterns:
+        if re.search(exclude_pattern, text_lower, flags=re.IGNORECASE):
+            return False  # No es PARTIAL CLOSE si contiene indicadores de CLOSE
+    
     # Patrones en español
     patterns_es = [
-        # Patrones con "profits" / "profit"
+        # Patrones con "profits" / "profit" (pero no "close all profits")
         r'\btomen\s+algo\s+de\s+profits\b',
         r'\btomen\s+algo\s+de\s+profit\b',
         r'\btomad\s+algo\s+de\s+profits\b',
@@ -285,8 +303,9 @@ def _has_partial_close_keyword(text: str) -> bool:
         r'\btomar\s+algo\s+de\s+profit\b',
         r'\btomamos\s+algo\s+de\s+profits\b',
         r'\btomamos\s+algo\s+de\s+profit\b',
-        r'\bprofits\b',  # Palabra "profits" como palabra completa
-        r'\bprofit\b',    # Palabra "profit" como palabra completa
+        # "profits" o "profit" como palabra completa (ya excluimos "close all" arriba)
+        r'\bprofits\b',
+        r'\bprofit\b',
         # Patrones con "beneficios"
         r'\btomen\s+beneficios\b',
         r'\btomen\s+beneficio\b',
@@ -336,13 +355,14 @@ def _has_partial_close_keyword(text: str) -> bool:
         r'\btake\s+partial\b',
         r'\btake\s+partials\b',
         r'\bpartial\b',  # Solo "partial" como palabra completa
-        # Patrones con "profits" / "profit"
+        # Patrones con "profits" / "profit" (pero no "close all profits")
         r'\btake\s+some\s+profits\b',
         r'\btake\s+some\s+profit\b',
         r'\btaking\s+some\s+profits\b',
         r'\btaking\s+some\s+profit\b',
-        r'\bprofits\b',  # Palabra "profits" como palabra completa
-        r'\bprofit\b',   # Palabra "profit" como palabra completa
+        # "profits" o "profit" como palabra completa (ya excluimos "close all" arriba)
+        r'\bprofits\b',
+        r'\bprofit\b',
     ]
     
     # Verificar patrones en español
@@ -876,7 +896,7 @@ def _decidir_score(data: Dict[str, Any]) -> int:
     10 si: clasificacion=Válido AND accion definida AND entrada utilizable AND SL AND ≥1 TP
            AND la coherencia direccional no es False.
     Caso especial PARTIAL CLOSE: score=10 si accion=PARTIAL CLOSE (requisitos más flexibles).
-    Caso especial CLOSEALL: score=10 si accion=CLOSEALL (requisitos más flexibles).
+    Caso especial CLOSE: score=10 si accion=CLOSE (requisitos más flexibles).
     Caso especial BREAKEVEN: score=10 si accion=BREAKEVEN (requisitos más flexibles).
     Caso especial MOVETO: score=10 si accion=MOVETO AND sl definido (requisitos más flexibles).
     Caso especial STOPLOSSESTO: score=10 si accion=STOPLOSSESTO AND sl definido (requisitos más flexibles).
@@ -888,9 +908,9 @@ def _decidir_score(data: Dict[str, Any]) -> int:
     if accion == "PARTIAL CLOSE" and es_valido:
         return 10  # PARTIAL CLOSE tiene score=10 sin requerir entrada, SL o TP explícitos
     
-    # Caso especial: CLOSEALL (prioridad 2)
-    if accion == "CLOSEALL" and es_valido:
-        return 10  # CLOSEALL tiene score=10 sin requerir entrada, SL o TP explícitos
+    # Caso especial: CLOSE (prioridad 2)
+    if accion == "CLOSE" and es_valido:
+        return 10  # CLOSE tiene score=10 sin requerir entrada, SL o TP explícitos
     
     # Caso especial: BREAKEVEN
     if accion == "BREAKEVEN" and es_valido:
@@ -936,9 +956,9 @@ def _es_valido(texto: str, activos: List[str]) -> bool:
     # Caso especial: partial close (no requiere TP explícito, activo puede inferirse del canal)
     if _has_partial_close_keyword(texto):
         return True  # PARTIAL CLOSE es válido incluso sin activo explícito o TP
-    # Caso especial: closeall (no requiere TP explícito, activo puede inferirse del canal)
-    if _has_closeall_keyword(texto):
-        return True  # CLOSEALL es válido incluso sin activo explícito o TP
+    # Caso especial: close (no requiere TP explícito, activo puede inferirse del canal)
+    if _has_close_keyword(texto):
+        return True  # CLOSE es válido incluso sin activo explícito o TP
     # Caso especial: breakeven (no requiere TP explícito, activo puede inferirse del canal)
     if _has_breakeven_keyword(texto):
         return True  # Breakeven es válido incluso sin activo explícito o TP
@@ -1042,7 +1062,7 @@ def formatear_senal(senal: Dict[str, Any]) -> Optional[str]:
     TP3: X
     (y todos los TPs adicionales disponibles)
     
-    Para acciones especiales (BREAKEVEN, MOVETO, STOPLOSSESTO, PARTIAL CLOSE, CLOSEALL),
+    Para acciones especiales (BREAKEVEN, MOVETO, STOPLOSSESTO, PARTIAL CLOSE, CLOSE),
     devuelve solo el nombre de la acción detectada.
     """
     if not senal or int(senal.get("score", 0)) != 10:
@@ -1051,7 +1071,7 @@ def formatear_senal(senal: Dict[str, Any]) -> Optional[str]:
     accion = senal.get("accion")
     
     # Casos especiales: devolver solo el nombre de la acción
-    acciones_especiales = ["BREAKEVEN", "MOVETO", "STOPLOSSESTO", "PARTIAL CLOSE", "CLOSEALL"]
+    acciones_especiales = ["BREAKEVEN", "MOVETO", "STOPLOSSESTO", "PARTIAL CLOSE", "CLOSE"]
     if accion in acciones_especiales:
         return accion
 
@@ -1156,9 +1176,9 @@ def formatear_motivo_rechazo(senal: Dict[str, Any]) -> Optional[str]:
     # Solo reportar lo que realmente falta para obtener score=10
     # Verificar requisitos en el mismo orden que _decidir_score()
     
-    # Para casos especiales (PARTIAL CLOSE, CLOSEALL, BREAKEVEN, MOVETO, STOPLOSSESTO)
+    # Para casos especiales (PARTIAL CLOSE, CLOSE, BREAKEVEN, MOVETO, STOPLOSSESTO)
     # tienen requisitos diferentes
-    es_caso_especial = accion in ("PARTIAL CLOSE", "CLOSEALL", "BREAKEVEN", "MOVETO", "STOPLOSSESTO")
+    es_caso_especial = accion in ("PARTIAL CLOSE", "CLOSE", "BREAKEVEN", "MOVETO", "STOPLOSSESTO")
     
     if es_caso_especial:
         # Para MOVETO y STOPLOSSESTO solo requieren SL
@@ -1225,7 +1245,31 @@ def clasificar_mensajes(texto: str) -> List[Dict[str, Any]]:
 
     text_search = _normalize_text_for_search(texto)
     
-    # PRIORIDAD 1: Detectar PARTIAL CLOSE antes que cualquier otro caso
+    # PRIORIDAD 1: Detectar CLOSE antes que PARTIAL CLOSE (para evitar conflictos con "close all profits")
+    # CLOSE tiene prioridad porque "close all" es más específico que solo "profits"
+    es_close = _has_close_keyword(text_search)
+    if es_close:
+        # Construir resultado especial para CLOSE
+        activos = _find_assets(text_search)
+        activo = activos[0] if activos else None
+        
+        out = {
+            "clasificacion": "Válido",
+            "activo": activo or "",
+            "accion": "CLOSE",
+            "direccion": "INDETERMINADA",
+            "entrada": {"tipo": "no_encontrada", "valores": []},
+            "entrada_resuelta": None,  # No se requiere entrada
+            "entrada_fuente": None,
+            "sl": None,  # No se requiere SL
+            "tp": [],  # No se requieren TPs
+            "consistencia_direccion": None,  # No aplica
+            "target_open": False,
+        }
+        out["score"] = _decidir_score(out)
+        return [out]
+    
+    # PRIORIDAD 2: Detectar PARTIAL CLOSE (solo si no es CLOSE)
     es_partial_close = _has_partial_close_keyword(text_search)
     if es_partial_close:
         # Construir resultado especial para PARTIAL CLOSE
@@ -1248,17 +1292,15 @@ def clasificar_mensajes(texto: str) -> List[Dict[str, Any]]:
         out["score"] = _decidir_score(out)
         return [out]
     
-    # PRIORIDAD 2: Detectar CLOSEALL antes que MOVETO y BREAKEVEN
-    es_closeall = _has_closeall_keyword(text_search)
-    if es_closeall:
-        # Construir resultado especial para CLOSEALL
+    # PRIORIDAD 3: Detectar MOVETO antes del procesamiento normal
+        # Construir resultado especial para CLOSE
         activos = _find_assets(text_search)
         activo = activos[0] if activos else None
         
         out = {
             "clasificacion": "Válido",
             "activo": activo or "",
-            "accion": "CLOSEALL",
+            "accion": "CLOSE",
             "direccion": "INDETERMINADA",
             "entrada": {"tipo": "no_encontrada", "valores": []},
             "entrada_resuelta": None,  # No se requiere entrada

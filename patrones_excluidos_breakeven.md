@@ -238,3 +238,17 @@ Pero actualmente el sistema ya tiene detección de breakeven mediante `_has_brea
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+

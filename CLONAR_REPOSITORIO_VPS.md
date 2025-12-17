@@ -341,3 +341,14 @@ python listener.py
 - **Cada VPS necesita su propio `.env`** con sus credenciales
 - **La base de datos `pasarela.db`** se creará automáticamente al ejecutar el parser
 
+
+
+
+
+
+
+
+
+
+
+

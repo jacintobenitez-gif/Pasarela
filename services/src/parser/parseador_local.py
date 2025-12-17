@@ -673,8 +673,8 @@ def _build_fila_desde_resultado(resultados, evento):
     # Caso especial: PARTIAL CLOSE - solo rellenar order_type y channel
     es_partial_close = (accion == "PARTIAL CLOSE")
     
-    # Caso especial: CLOSEALL - solo rellenar order_type y channel
-    es_closeall = (accion == "CLOSEALL")
+    # Caso especial: CLOSE - solo rellenar order_type y channel
+    es_close = (accion == "CLOSE")
     
     # Caso especial: BREAKEVEN - solo rellenar symbol, order_type y channel
     es_breakeven = (accion == "BREAKEVEN")
@@ -692,8 +692,8 @@ def _build_fila_desde_resultado(resultados, evento):
         tp2 = None
         tp3 = None
         tp4 = None
-    elif es_closeall:
-        # CLOSEALL: solo order_type y channel, resto vacío
+    elif es_close:
+        # CLOSE: solo order_type y channel, resto vacío
         symbol = None
         entry_price = None
         sl = None
@@ -756,7 +756,7 @@ def _build_fila_desde_resultado(resultados, evento):
         'MOVETO': 'SL A',
         'STOPLOSSESTO': 'VARIOS SL A',
         'PARTIAL CLOSE': 'PARCIAL',
-        'CLOSEALL': 'CERRAR'
+        'CLOSE': 'CERRAR'
     }
     order_type = order_type_map.get(accion, accion)
     
@@ -983,7 +983,7 @@ def main():
                                                 payload = f"{origen} PARCIAL"
                                             else:
                                                 payload = "PARCIAL"
-                                        # Caso especial: CERRAR (CLOSEALL) - mensaje simple
+                                        # Caso especial: CERRAR (CLOSE) - mensaje simple
                                         elif fila.get('order_type') == 'CERRAR':
                                             if origen:
                                                 payload = f"{origen} CERRAR"

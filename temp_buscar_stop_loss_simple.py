@@ -141,3 +141,17 @@ print("\n\nAnálisis completado.")
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
