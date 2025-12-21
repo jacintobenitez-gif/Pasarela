@@ -212,23 +212,64 @@ def _has_tp_keyword(text: str) -> bool:
 def _has_close_keyword(text: str) -> bool:
     """
     Detecta si el texto contiene referencias a cerrar todas las posiciones.
-    Nota: "close" y "cerrar" solas NO se detectan (necesitan contexto).
-    "closed" en pasado SÍ se detecta como CLOSE.
+    Nota: se detectan variantes/conjugaciones; las negaciones ("dont close", "no cerrar", etc.)
+    anulan la detección.
     """
     text_lower = text.lower()
+
+    # Negaciones: si el texto indica explícitamente NO cerrar, anular la detección.
+    # (Se evalúa antes que los patrones positivos para evitar falsos positivos.)
+    neg_patterns = [
+        r"\bdon't\s+close\b",
+        r"\bdont\s+close\b",
+        r"\bdo\s+not\s+close\b",
+        r"\bno\s+close\b",
+        # Español (formas comunes)
+        r"\bno\s+cerrar\b",
+        r"\bno\s+cierra\b",
+        r"\bno\s+cierren\b",
+        r"\bno\s+cierres\b",
+        r"\bno\s+cierro\b",
+        r"\bno\s+cierras\b",
+        r"\bno\s+cierre\b",
+        r"\bno\s+cerrad\b",
+        r"\bno\s+cerremos\b",
+        r"\bno\s+cerreis\b",
+    ]
+    for pattern in neg_patterns:
+        if re.search(pattern, text_lower, flags=re.IGNORECASE):
+            return False
     
-    # Patrones en inglés (excluyendo "close" sola)
+    # Patrones en inglés
     patterns_en = [
+        r'\bclose\b',
         r'\bclose\s+all\b',
         r'\bclose\s+everything\b',
         r'\bclose\s+now\b',
         r'\bclosed\b',  # Pasado - sí se detecta
+        r'\bcloses\b',
+        r'\bclosing\b',
+        r'\bto\s+close\b',
+        r'\bdo\s+close\b',
+        r'\bdoes\s+close\b',
+        r'\bdid\s+close\b',
+        r'\bwill\s+close\b',
+        r'\bwould\s+close\b',
+        r'\bhave\s+closed\b',
+        r'\bhas\s+closed\b',
+        r'\bhad\s+closed\b',
+        r'\bwill\s+have\s+closed\b',
+        r'\bwould\s+have\s+closed\b',
+        r'\bbe\s+closing\b',
+        r'\bbeing\s+closed\b',
+        r'\bbe\s+closed\b',
         r'\bflatten\s+all\b',
         r'\bflatten\b',
     ]
     
-    # Patrones en español (excluyendo "cerrar" sola)
+    # Patrones en español
     patterns_es = [
+        r'\bcerrar\b',
         r'\bcerrar\s+todo\b',
         r'\bcerrar\s+ya\b',
         r'\bcerrar\s+ahora\b',
@@ -254,6 +295,49 @@ def _has_close_keyword(text: str) -> bool:
         r'\bcierra\s+operaciones\b',
         r'\bsalir\s+de\s+todo\b',
         r'\bsalida\s+total\b',
+        # Conjugaciones/variantes (permiten CLOSE sin "todo/all")
+        r'\bcerrando\b',
+        r'\bcerrado\b',
+        r'\bcierro\b',
+        r'\bcierras\b',
+        r'\bcierra\b',
+        r'\bcerramos\b',
+        r'\bcerrais\b',
+        r'\bcierran\b',
+        r'\bcerraba\b',
+        r'\bcerrabas\b',
+        r'\bcerrabamos\b',
+        r'\bcerrabais\b',
+        r'\bcerraban\b',
+        r'\bcerre\b',
+        r'\bcerraste\b',
+        r'\bcerro\b',
+        r'\bcerrasteis\b',
+        r'\bcerraron\b',
+        r'\bcerrare\b',
+        r'\bcerraras\b',
+        r'\bcerrara\b',
+        r'\bcerraremos\b',
+        r'\bcerrareis\b',
+        r'\bcerraran\b',
+        r'\bcerraria\b',
+        r'\bcerrarias\b',
+        r'\bcerrariamos\b',
+        r'\bcerrariais\b',
+        r'\bcerrarian\b',
+        r'\bcierre\b',
+        r'\bcierres\b',
+        r'\bcerremos\b',
+        r'\bcerreis\b',
+        r'\bcerraramos\b',
+        r'\bcerrarais\b',
+        r'\bcerrase\b',
+        r'\bcerrases\b',
+        r'\bcerrasemos\b',
+        r'\bcerraseis\b',
+        r'\bcerrasen\b',
+        r'\bcerrares\b',
+        r'\bcerraren\b',
     ]
     
     # Verificar patrones en inglés
