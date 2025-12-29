@@ -5,11 +5,12 @@
 # - Hot-reload: recarga configuración automáticamente
 # - Publica mensajes en Redis Streams
 
-import os, csv, json, asyncio
+import os, csv, json, asyncio, subprocess
 from datetime import datetime, timezone
 from telethon import TelegramClient, events, functions, types
 from telethon.tl.types import Channel
 from redis.asyncio import Redis
+import redis.exceptions
 
 # ========= (PATCH) imports para .env =========
 from pathlib import Path
@@ -74,6 +75,108 @@ def append_csv(row):
 def log(msg: str):
     print(f"[listener] {datetime.now(timezone.utc).isoformat()} {msg}")
 
+# ========= REDIS WATCHDOG (auto-restart) =========
+REDIS_SERVICE_NAME = os.getenv("REDIS_SERVICE_NAME", "Memurai")  # Nombre del servicio de Redis en Windows
+REDIS_RESTART_MAX_RETRIES = int(os.getenv("REDIS_RESTART_MAX_RETRIES", "3"))  # Intentos máximos de reinicio
+REDIS_RESTART_WAIT_SEC = int(os.getenv("REDIS_RESTART_WAIT_SEC", "2"))  # Segundos a esperar tras reiniciar
+
+class RedisUnrecoverableError(Exception):
+    """Excepción lanzada cuando Redis no se puede recuperar después de todos los intentos."""
+    pass
+
+async def check_and_restart_redis() -> bool:
+    """
+    Verifica si Redis responde y, si no, reinicia el servicio de Windows.
+    Retorna True si Redis está disponible (o se recuperó), False si no se pudo recuperar.
+    """
+    log("[REDIS-WATCHDOG] Verificando estado de Redis...")
+    
+    # 1. Intentar ping rápido a Redis
+    try:
+        test_r = Redis.from_url(REDIS_URL, decode_responses=True, socket_connect_timeout=2)
+        await test_r.ping()
+        await test_r.aclose()
+        log("[REDIS-WATCHDOG] ✅ Redis responde correctamente")
+        return True
+    except Exception as e:
+        log(f"[REDIS-WATCHDOG] ⚠️  Redis NO responde: {e}")
+    
+    # 2. Redis no responde, verificar y reiniciar servicio
+    log(f"[REDIS-WATCHDOG] Verificando servicio de Windows: {REDIS_SERVICE_NAME}")
+    
+    try:
+        # Verificar estado del servicio
+        check_cmd = f"Get-Service -Name '{REDIS_SERVICE_NAME}' | Select-Object -ExpandProperty Status"
+        proc = await asyncio.create_subprocess_shell(
+            f"powershell -Command \"{check_cmd}\"",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await proc.communicate()
+        status = stdout.decode().strip() if stdout else ""
+        
+        log(f"[REDIS-WATCHDOG] Estado del servicio: {status}")
+        
+        # Si el servicio está detenido o no está corriendo, iniciarlo/reiniciarlo
+        if status.lower() not in ["running", "startpending"]:
+            log(f"[REDIS-WATCHDOG] 🔄 Reiniciando servicio {REDIS_SERVICE_NAME}...")
+            
+            # Intentar iniciar/reiniciar el servicio
+            restart_cmd = f"Start-Service -Name '{REDIS_SERVICE_NAME}'; if ($?) {{ Write-Output 'OK' }} else {{ Write-Output 'FAIL' }}"
+            proc = await asyncio.create_subprocess_shell(
+                f"powershell -Command \"{restart_cmd}\"",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await proc.communicate()
+            result = stdout.decode().strip() if stdout else ""
+            
+            if "OK" in result or proc.returncode == 0:
+                log(f"[REDIS-WATCHDOG] ✅ Servicio {REDIS_SERVICE_NAME} iniciado")
+            else:
+                log(f"[REDIS-WATCHDOG] ❌ Error iniciando servicio: {stderr.decode() if stderr else 'Unknown error'}")
+                return False
+        else:
+            log(f"[REDIS-WATCHDOG] ⚠️  Servicio está corriendo pero Redis no responde. Reiniciando...")
+            restart_cmd = f"Restart-Service -Name '{REDIS_SERVICE_NAME}'; if ($?) {{ Write-Output 'OK' }} else {{ Write-Output 'FAIL' }}"
+            proc = await asyncio.create_subprocess_shell(
+                f"powershell -Command \"{restart_cmd}\"",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await proc.communicate()
+            result = stdout.decode().strip() if stdout else ""
+            
+            if "OK" not in result and proc.returncode != 0:
+                log(f"[REDIS-WATCHDOG] ❌ Error reiniciando servicio: {stderr.decode() if stderr else 'Unknown error'}")
+                return False
+        
+        # 3. Esperar a que Redis esté disponible
+        log(f"[REDIS-WATCHDOG] ⏳ Esperando {REDIS_RESTART_WAIT_SEC}s a que Redis inicie...")
+        await asyncio.sleep(REDIS_RESTART_WAIT_SEC)
+        
+        # 4. Verificar que Redis responde (con retry)
+        for attempt in range(REDIS_RESTART_MAX_RETRIES):
+            try:
+                test_r = Redis.from_url(REDIS_URL, decode_responses=True, socket_connect_timeout=3)
+                await test_r.ping()
+                await test_r.aclose()
+                log(f"[REDIS-WATCHDOG] ✅ Redis recuperado después de {attempt + 1} intento(s)")
+                return True
+            except Exception as e:
+                if attempt < REDIS_RESTART_MAX_RETRIES - 1:
+                    wait_time = 2 * (attempt + 1)  # Backoff exponencial: 2s, 4s, 6s
+                    log(f"[REDIS-WATCHDOG] ⏳ Intento {attempt + 1}/{REDIS_RESTART_MAX_RETRIES} falló, esperando {wait_time}s...")
+                    await asyncio.sleep(wait_time)
+                else:
+                    log(f"[REDIS-WATCHDOG] ❌ Redis NO se recuperó después de {REDIS_RESTART_MAX_RETRIES} intentos")
+        
+        return False
+        
+    except Exception as e:
+        log(f"[REDIS-WATCHDOG] ❌ Error crítico verificando/reiniciando Redis: {e}")
+        return False
+
 # ========= REDIS UTILS (async) =========
 async def get_or_set_rev_on_new(r: Redis, channel_id: int, msg_id: int) -> int:
     rev_key = f"tg:rev:{channel_id}:{msg_id}"
@@ -96,13 +199,53 @@ async def dedup_once(r: Redis, channel_id: int, msg_id: int, revision: int) -> b
     return bool(ok)
 
 async def publish_to_stream(r: Redis, fields: dict):
-    sec, micro = await r.time()
-    sec = int(sec); micro = int(micro)
-    dt = datetime.fromtimestamp(sec + micro / 1_000_000, tz=timezone.utc)
-    ts_redis_ingest = dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
-    to_send = dict(fields)
-    to_send["ts_redis_ingest"] = ts_redis_ingest
-    await r.xadd(PARSE_STREAM, to_send, maxlen=STREAM_MAXLEN, approximate=True)
+    """
+    Publica mensaje en Redis Stream con recuperación automática si Redis cae.
+    Si falla la inserción, verifica y reinicia Redis automáticamente, luego reintenta.
+    """
+    max_retries = 2  # Intentos máximos de publicación (1 inicial + 1 después de reinicio)
+    
+    for attempt in range(max_retries):
+        try:
+            # Intentar obtener timestamp de Redis
+            sec, micro = await r.time()
+            sec = int(sec); micro = int(micro)
+            dt = datetime.fromtimestamp(sec + micro / 1_000_000, tz=timezone.utc)
+            ts_redis_ingest = dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+            to_send = dict(fields)
+            to_send["ts_redis_ingest"] = ts_redis_ingest
+            
+            # Intentar insertar en stream
+            await r.xadd(PARSE_STREAM, to_send, maxlen=STREAM_MAXLEN, approximate=True)
+            return  # ✅ Éxito, salir
+            
+        except (ConnectionError, TimeoutError, redis.exceptions.ConnectionError, 
+                redis.exceptions.TimeoutError, OSError) as e:
+            # Error de conexión - Redis puede estar caído
+            if attempt == 0:
+                # Primer intento falló, verificar y reiniciar Redis
+                log(f"[REDIS-WATCHDOG] ⚠️  Error publicando en Redis (intento {attempt + 1}): {e}")
+                log(f"[REDIS-WATCHDOG] 🔄 Intentando recuperar Redis...")
+                
+                redis_recovered = await check_and_restart_redis()
+                
+                if redis_recovered:
+                    log(f"[REDIS-WATCHDOG] ✅ Redis recuperado, reintentando publicación...")
+                    # Continuar al siguiente intento (reintentar publicación)
+                    continue
+                else:
+                    # Redis no se pudo recuperar después de todos los intentos
+                    log(f"[REDIS-WATCHDOG] ❌ No se pudo recuperar Redis después de {REDIS_RESTART_MAX_RETRIES} intentos.")
+                    raise RedisUnrecoverableError("Redis no se pudo recuperar. El listener se detendrá.")
+            else:
+                # Segundo intento también falló después de reiniciar
+                log(f"[REDIS-WATCHDOG] ❌ Error persistente después de reiniciar Redis: {e}")
+                raise RedisUnrecoverableError("Redis no responde después del reinicio. El listener se detendrá.")
+                
+        except Exception as e:
+            # Otro tipo de error (no de conexión) - no intentar recuperar
+            log(f"[REDIS-WATCHDOG] ❌ Error no relacionado con conexión: {e}")
+            raise  # Re-lanzar excepción
 
 # ========= TELETHON CLIENT =========
 client = TelegramClient(session_name, api_id, api_hash)
@@ -311,10 +454,14 @@ async def main():
             "text/raw": text,
             "estado_operacion": "0"
         }
-        await publish_to_stream(r, fields)
-        log(f"NEW | ch_id={ch_id} ({title or username}) msg_id={msg.id} rev={rev} → {PARSE_STREAM}")
-        if WRITE_CSV:
-            append_csv(["new", ch_id, title, username, msg.id, rev, utc_iso(msg.date), str(msg.sender_id or ""), text])
+        try:
+            await publish_to_stream(r, fields)
+            log(f"NEW | ch_id={ch_id} ({title or username}) msg_id={msg.id} rev={rev} → {PARSE_STREAM}")
+            if WRITE_CSV:
+                append_csv(["new", ch_id, title, username, msg.id, rev, utc_iso(msg.date), str(msg.sender_id or ""), text])
+        except RedisUnrecoverableError:
+            # Redis no se pudo recuperar - detener listener
+            raise
 
     # ==== MESSAGE EDITED ====
     @client.on(events.MessageEdited())
@@ -369,17 +516,44 @@ async def main():
             "text/raw": text,
             "estado_operacion": "0"
         }
-        await publish_to_stream(r, fields)
-        log(f"EDIT | ch_id={ch_id} ({title or username}) msg_id={msg.id} rev={rev} → {PARSE_STREAM}")
-        if WRITE_CSV:
-            append_csv(["edit", ch_id, title, username, msg.id, rev,
-                        utc_iso(msg.edit_date or msg.date), str(msg.sender_id or ""), text])
+        try:
+            await publish_to_stream(r, fields)
+            log(f"EDIT | ch_id={ch_id} ({title or username}) msg_id={msg.id} rev={rev} → {PARSE_STREAM}")
+            if WRITE_CSV:
+                append_csv(["edit", ch_id, title, username, msg.id, rev,
+                            utc_iso(msg.edit_date or msg.date), str(msg.sender_id or ""), text])
+        except RedisUnrecoverableError:
+            # Redis no se pudo recuperar - detener listener
+            raise
 
-    await client.run_until_disconnected()
+    try:
+        await client.run_until_disconnected()
+    except RedisUnrecoverableError as e:
+        # Redis no se pudo recuperar - detener listener con mensaje claro
+        log("")
+        log("=" * 80)
+        log("❌ ERROR CRÍTICO: REDIS NO SE PUEDE RECUPERAR")
+        log("=" * 80)
+        log("")
+        log("El listener se ha detenido porque Redis no responde después de múltiples intentos.")
+        log("")
+        log("ACCIONES REQUERIDAS:")
+        log(f"  1. Verifica que el servicio '{REDIS_SERVICE_NAME}' esté instalado y configurado correctamente")
+        log(f"  2. Inicia el servicio manualmente: Start-Service -Name '{REDIS_SERVICE_NAME}'")
+        log("  3. Verifica que Redis esté escuchando en el puerto 6379")
+        log(f"  4. Verifica la configuración REDIS_URL: {REDIS_URL}")
+        log("")
+        log("Una vez que Redis esté funcionando, reinicia el listener.")
+        log("=" * 80)
+        log("")
+        raise SystemExit(1)
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         print("listener stopped")
+    except RedisUnrecoverableError:
+        # Ya se manejó arriba, solo salir
+        pass
 
